@@ -1,20 +1,59 @@
-# Zed Context Pilot: Architecture v0
+# Zed Context Pilot: Architecture v1
 
 Tarih: 2026-05-11
 
 ## Hedef
 
-Aktif Zed worktree'si için yüksek sinyalli bir proje özeti üretmek ve bunu Assistant paneline tek komutla sokmak.
+Aktif Zed worktree'si icin surekli guncel kalan, yuksek sinyalli bir calisma hafizasi uretmek ve bunu hem kullaniciya gorunur hale getirmek hem de assistant'a varsayilan context olarak vermek.
 
-İlk hedef komut:
+Bu urun slash command merkezli degil. Slash command sadece fallback ve debug yuzeyi.
+
+## Urun modeli
+
+### 1. Gorunen katman: Context HUD
+
+Kullanicinin editor icinde surekli gordugu ozet.
+
+Beklenen bloklar:
+
+1. `Now`
+   - son 15 dk
+   - en cok degisen dosyalar
+   - aktif branch
+   - local change ozeti
+2. `Session`
+   - son 5 saat
+   - bugunun calisma temasi
+   - odak klasorleri
+   - son anlamli donus noktasi
+3. `Week`
+   - son 7 gun
+   - tekrar eden is basliklari
+   - iliskili dosya alanlari
+   - acik kalan is parcasi
+
+### 2. Gorunmeyen katman: Automatic Assistant Context
+
+Assistant mesaja cevap verirken bu hafizayi bilsin.
+
+Istenen davranis:
+
+- kullanici konuyu yarim cumleyle acsa bile baglami kacirmasin
+- "dun ne yapiyorduk?" ve "bu branch'te ne degisti?" gibi sorulara direkt cevap verebilsin
+- son 5 saatlik odagi ve haftalik calisma cizgisini koruyabilsin
+
+### 3. Fallback katman: Manual Injection
+
+Otomatik baglama basarisiz veya kisitliysa kullanilacak mekanizma.
+
+Ornek:
 
 - `/hello`
+- ileride `/brief`
 
-İkinci hedef komut:
+Bu urunun cekirdegi degildir.
 
-- `/brief`
-
-## Fazlara bölünmüş yaklaşım
+## Fazlara bolunmus yaklasim
 
 ### Faz 0: API doğrulama
 
@@ -32,53 +71,88 @@ Beklenen davranış:
 - aktif worktree yolunu okur
 - Assistant içine kısa bir metin enjekte eder
 
-### Faz 1: Git tabanlı briefing
+### Faz 1: Context Engine
 
 Amaç:
 
-- en güvenilir ve düşük maliyetli sinyalleri toplamak
+- zaman pencereli yuksek sinyal hafiza uretmek
 
-Planlanan briefing alanları:
+Zaman pencereleri:
+
+1. `now`: son 15 dakika
+2. `session`: son 5 saat
+3. `week`: son 7 gun
+
+Toplanacak sinyaller:
 
 1. aktif worktree yolu
 2. aktif branch
-3. son 3 commit özeti
-4. çalışma ağacında değişen dosyalar
+3. son commitler ve konu ozetleri
+4. staged / unstaged degisiklikler
 5. son N dakikada dokunulan dosyalar
+6. son 5 saatte yogunlasilan klasorler
+7. son 7 gunde tekrar eden is temalari
+8. varsa diagnostics ozeti
+9. assistant konusma hafizasi ozetleri
 
 Teknik yöntem:
 
 - `Worktree::root_path()`
 - `process:exec` ile `git`
-- gerekiyorsa dosya mtime taraması
+- gerekiyorsa dosya mtime taramasi
+- yerel state dosyalari
+
+Uretilecek artefaktlar:
+
+- `.zed-context/state.json`
+- `.zed-context/brief-now.md`
+- `.zed-context/brief-session.md`
+- `.zed-context/brief-week.md`
 
 Not:
 
-Burada "The Sentinel" için sürekli çalışan arka plan worker yerine önce "on-demand snapshot" almak daha doğru. Zed extension Wasm yüzeyinde ilk sürüm için bu daha basit ve daha savunulabilir.
+Ilk implementation'da bile veri modeli HUD odakli olmali. "Tek seferlik briefing" mantigi ana tasarim olmamali.
 
-### Faz 2: Diagnostics entegrasyonu
+### Faz 2: HUD Surface
 
 Amaç:
 
-- briefing içine derleyici/LSP hata bilgisini eklemek
+- context'i editor icinde surekli gorunur kilmak
+
+Secenekler:
+
+1. Zed extension UI primitifi varsa dogrudan onu kullanmak
+2. Zed icinde mevcut bir yuzeye bindirmek
+3. bunun mumkun olmadigi durumda dosya tabanli veya command tabanli bir gecici HUD uretmek
 
 Risk:
 
-- extension API üzerinden diagnostics erişimi araştırma aşamasında doğrulanmadı
+- arastirma asamasinda persistent custom HUD API'si dogrulanmadi
 
-Seçenekler:
+Bu yuzden HUD entegrasyonu "dogrudan", "uyarlanmis", "fallback" diye katmanlanmali.
 
-1. extension API'de varsa doğrudan çekmek
-2. yoksa bunu kapsam dışı bırakmak
-3. alternatif olarak proje komutlarından türetilmiş hata özeti üretmek
-
-Bu faz için önce Zed kaynak kodunda ya da güncel API belgelerinde net erişim noktası bulunmalı.
-
-### Faz 3: Prompt ergonomisi
+### Faz 3: Automatic Assistant Context
 
 Amaç:
 
-- `/brief` çıktısını sadece ham metin değil, iyi biçimlenmiş bir briefing haline getirmek
+- assistant'in bu hafizayi varsayilan olarak kullanmasi
+
+Secenekler:
+
+1. resmi otomatik prompt/context hook'u varsa onu kullanmak
+2. prompt override hattina baglanmak
+3. MCP/tool mantigiyla modele bu hafizayi cekmeyi ogretmek
+4. hicbiri olmazsa fallback injection kullanmak
+
+Risk:
+
+- arastirma sirasinda bu ihtiyac icin net bir extension hook'u dogrulanmadi
+
+### Faz 4: Fallback slash commands
+
+Amaç:
+
+- otomatik entegrasyon olmadiginda hizli kurtarma mekanizmasi sunmak
 
 Örnek çıktı şablonu:
 
@@ -98,25 +172,71 @@ Amaç:
 - added: docs/02-architecture.md
 ```
 
+## Veri modeli
+
+Onerilen `state.json` iskeleti:
+
+```json
+{
+  "worktree_root": "/path/to/project",
+  "branch": "main",
+  "updated_at": "2026-05-11T10:00:00Z",
+  "now": {
+    "window_minutes": 15,
+    "top_files": [],
+    "change_summary": [],
+    "diagnostics_summary": null
+  },
+  "session": {
+    "window_hours": 5,
+    "focus_areas": [],
+    "themes": [],
+    "resume_hint": ""
+  },
+  "week": {
+    "window_days": 7,
+    "themes": [],
+    "hot_paths": [],
+    "open_loops": []
+  },
+  "assistant_memory": {
+    "latest_summary": "",
+    "thread_refs": []
+  }
+}
+```
+
 ## Kararlar
 
-### Neden önce slash command?
+### Neden slash command ana urun degil?
 
-- kullanıcı deneyimi hedefi doğrudan burada
-- resmi örnek mevcut
-- düşük entegrasyon riski
+- kullanici beklentisi sifir ek efor
+- HUD hissi surekli gorunurluk ister
+- tek komutla inject etmek "where was I?" problemini tam cozmez
 
-### Neden önce `git` tabanlı sinyal?
+### Neden once context engine?
 
-- güvenilir
+- UI ve prompt hook belirsiz olsa bile cekirdek deger burada
+- entegrasyon yollari degisse de veri modeli korunur
+- baska oturumda implementasyonu parcali sekilde yaptirmayi kolaylastirir
+
+### Neden zaman pencereleri?
+
+- Claude HUD hissinin cekirdegi sureklilik ve ritim
+- "simdi", "bugun", "bu hafta" farkli bilissel ihtiyaclari karsilar
+- assistant'in cevabini sadece son diff'e degil, calisma egilimine baglar
+
+### Neden once `git` tabanli sinyal?
+
+- guvenilir
 - deterministik
-- extension API ile uyumlu görünmesi daha olası
+- extension API ile uyumlu gorunmesi daha olasi
 
-### Neden sürekli watcher ile başlamıyoruz?
+### Neden surekli watcher ile baslamiyoruz?
 
-- ilk sürüm için gereksiz karmaşıklık
-- Wasm ve capability sınırları erken aşamada tasarımı zorlar
-- kullanıcı değeri önce tek komutla da üretilebilir
+- ilk surumde asiri entegrasyon riski var
+- veri modelini once dogrulamak daha onemli
+- watcher daha sonra engine'e eklenebilir
 
 ## Minimal dosya yapısı
 
@@ -131,10 +251,12 @@ zed-context/
     02-architecture.md
 ```
 
-## Sonraki teknik adımlar
+## Sonraki teknik adimlar
 
-1. `/hello` komutunu ayağa kaldır
-2. Zed içinde dev extension olarak yükle
-3. `/brief` için `git` snapshot helper'ını ekle
-4. `process:exec` capability gereksinimini manifest ve kullanıcı dokümantasyonuna yaz
-5. diagnostics erişimini ayrı bir araştırma başlığı olarak çöz
+1. context engine modulunu tasarla
+2. `state.json` ve markdown brief uretimini ekle
+3. `now/session/week` ozetleyicilerini ayri fonksiyonlar halinde yaz
+4. `process:exec` capability gereksinimini manifest ve kullanici dokumantasyonuna yaz
+5. HUD yuzeyi icin Zed entegrasyon noktasini arastir
+6. otomatik assistant context hook'u icin Zed entegrasyon noktasini arastir
+7. fallback slash command'leri en son tamamla
