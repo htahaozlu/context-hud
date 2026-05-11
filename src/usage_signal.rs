@@ -82,6 +82,10 @@ pub struct AgentUsage {
     pub recent_sessions: Vec<SessionRecord>,
     #[serde(default)]
     pub active_sessions: Vec<ActiveSession>,
+    #[serde(default)]
+    pub session_5h_resets_at: Option<String>,
+    #[serde(default)]
+    pub week_7d_resets_at: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]

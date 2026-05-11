@@ -80,6 +80,10 @@ def empty_block():
         "by_project": [],
         "recent_sessions": [],
         "active_sessions": [],
+        # When the rolling 5h / 7d usage windows next free up — the timestamp
+        # of the oldest in-window turn plus the window length.
+        "session_5h_resets_at": None,
+        "week_7d_resets_at": None,
     }
 
 
@@ -184,6 +188,8 @@ def collect_claude():
         return out
     last_ts = 0.0
     per_session = {}  # path -> {first_ts, last_ts, tokens, model, cwd}
+    session_5h_oldest = None  # oldest turn ts within last 5h
+    week_7d_oldest = None     # oldest turn ts within last 7d
 
     for path in glob.glob(os.path.join(home, ".claude", "projects", "*", "*.jsonl")):
         try:
@@ -236,8 +242,12 @@ def collect_claude():
 
                     if age <= WIN_WEEK:
                         out["week_7d_tokens"] += total
+                        if week_7d_oldest is None or ts < week_7d_oldest:
+                            week_7d_oldest = ts
                     if age <= WIN_SESSION:
                         out["session_5h_tokens"] += total
+                        if session_5h_oldest is None or ts < session_5h_oldest:
+                            session_5h_oldest = ts
 
                     if ts > last_ts:
                         last_ts = ts
@@ -287,6 +297,12 @@ def collect_claude():
     recent.sort(key=lambda r: r["ended_at"], reverse=True)
     out["recent_sessions"] = recent[:20]
     out["active_sessions"] = build_active_sessions(per_session)
+    if session_5h_oldest is not None:
+        ts = session_5h_oldest + WIN_SESSION
+        out["session_5h_resets_at"] = datetime.fromtimestamp(ts, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+    if week_7d_oldest is not None:
+        ts = week_7d_oldest + WIN_WEEK
+        out["week_7d_resets_at"] = datetime.fromtimestamp(ts, tz=timezone.utc).isoformat().replace("+00:00", "Z")
     return out
 
 
@@ -297,6 +313,8 @@ def collect_codex():
         return out
     last_ts = 0.0
     per_session = {}
+    session_5h_oldest = None
+    week_7d_oldest = None
 
     for path in glob.glob(
         os.path.join(home, ".codex", "sessions", "**", "*.jsonl"), recursive=True
@@ -355,8 +373,12 @@ def collect_codex():
 
                     if age <= WIN_WEEK:
                         out["week_7d_tokens"] += total
+                        if week_7d_oldest is None or ts < week_7d_oldest:
+                            week_7d_oldest = ts
                     if age <= WIN_SESSION:
                         out["session_5h_tokens"] += total
+                        if session_5h_oldest is None or ts < session_5h_oldest:
+                            session_5h_oldest = ts
 
                     if ts > last_ts:
                         last_ts = ts
@@ -400,6 +422,12 @@ def collect_codex():
     recent.sort(key=lambda r: r["ended_at"], reverse=True)
     out["recent_sessions"] = recent[:20]
     out["active_sessions"] = build_active_sessions(per_session)
+    if session_5h_oldest is not None:
+        ts = session_5h_oldest + WIN_SESSION
+        out["session_5h_resets_at"] = datetime.fromtimestamp(ts, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+    if week_7d_oldest is not None:
+        ts = week_7d_oldest + WIN_WEEK
+        out["week_7d_resets_at"] = datetime.fromtimestamp(ts, tz=timezone.utc).isoformat().replace("+00:00", "Z")
     return out
 
 

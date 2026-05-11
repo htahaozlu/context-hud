@@ -214,6 +214,8 @@ struct Agent {
     let lastTurn: Date?
     let sessionStarted: Date?
     let activeSessions: [ActiveSession]
+    let session5hResetsAt: Date?
+    let week7dResetsAt: Date?
 
     /// Returns project basename (last path segment) or "—".
     var project: String {
@@ -292,6 +294,11 @@ final class Hud {
             )
         }
 
+        let parseDate: (String?) -> Date? = { s in
+            guard let s else { return nil }
+            return iso.date(from: s) ?? isoNoFrac.date(from: s)
+        }
+
         return Agent(
             name: name,
             session5h: (raw["session_5h_tokens"] as? UInt64) ?? UInt64(raw["session_5h_tokens"] as? Int ?? 0),
@@ -303,8 +310,21 @@ final class Hud {
             ctxWindow: (raw["last_context_window"] as? UInt64) ?? (raw["last_context_window"] as? Int).map(UInt64.init),
             lastTurn: ts,
             sessionStarted: started,
-            activeSessions: actives
+            activeSessions: actives,
+            session5hResetsAt: parseDate(raw["session_5h_resets_at"] as? String),
+            week7dResetsAt: parseDate(raw["week_7d_resets_at"] as? String)
         )
+    }
+
+    static func resetsIn(_ date: Date?) -> String {
+        guard let date else { return "—" }
+        let remaining = date.timeIntervalSinceNow
+        if remaining <= 0 { return "ready" }
+        if remaining < 60 { return "<1m" }
+        if remaining < 3600 { return "\(Int(remaining/60))m" }
+        let h = Int(remaining / 3600)
+        let m = (Int(remaining) % 3600) / 60
+        return m == 0 ? "\(h)h" : "\(h)h \(m)m"
     }
 
     static func formatDuration(_ start: Date?, _ end: Date?) -> String {
@@ -734,6 +754,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         }
 
+        // Limits — rolling 5h/7d usage windows with reset countdowns, so the
+        // user can see remaining budget without opening the detail page.
+        if !all.isEmpty {
+            menu.addItem(NSMenuItem.separator())
+            let h = NSMenuItem()
+            h.isEnabled = false
+            h.attributedTitle = NSAttributedString(
+                string: "LIMITS",
+                attributes: [
+                    .font: NSFont.menuFont(ofSize: NSFont.smallSystemFontSize - 1),
+                    .foregroundColor: NSColor.tertiaryLabelColor,
+                ]
+            )
+            menu.addItem(h)
+            for a in all {
+                appendLimits(menu: menu, agent: a)
+            }
+        }
+
         // Other AI tools detected on this system
         if !others.isEmpty {
             menu.addItem(NSMenuItem.separator())
@@ -960,6 +999,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func menuDidClose(_ menu: NSMenu) {
         previewTheme = nil
         statusItem.button?.attributedTitle = composeTitle(active: lastActive)
+    }
+
+    private func appendLimits(menu: NSMenu, agent a: Agent) {
+        let sep = SeparatorStore.current.isEmpty ? "·" : SeparatorStore.current
+        let fiveH = Hud.formatTokens(a.session5h)
+        let weekly = Hud.formatTokens(a.week7d)
+        let fiveReset = Hud.resetsIn(a.session5hResetsAt)
+        let weekReset = Hud.resetsIn(a.week7dResetsAt)
+        let line = "      \(a.name)   5h \(fiveH) (resets \(fiveReset))  \(sep)  7d \(weekly) (resets \(weekReset))"
+        let item = NSMenuItem()
+        item.isEnabled = false
+        item.attributedTitle = NSAttributedString(
+            string: line,
+            attributes: [
+                .font: NSFont.menuFont(ofSize: NSFont.smallSystemFontSize),
+                .foregroundColor: NSColor.secondaryLabelColor,
+            ]
+        )
+        menu.addItem(item)
     }
 
     private func appendTool(menu: NSMenu, tool: ToolSummary) {
