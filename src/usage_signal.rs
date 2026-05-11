@@ -15,6 +15,27 @@ use serde::{Deserialize, Serialize};
 #[cfg(target_arch = "wasm32")]
 use zed_extension_api::{self as zed, process::Command, serde_json};
 
+/// One in-flight session for an agent — a JSONL file whose last turn is
+/// within ACTIVE_WINDOW (currently 30 minutes). Multiple of these can be
+/// live at the same time when the user runs 3-5 sessions in parallel.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct ActiveSession {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub tokens: u64,
+    #[serde(default)]
+    pub started_at: Option<String>,
+    #[serde(default)]
+    pub last_turn_at: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub cwd: Option<String>,
+    #[serde(default)]
+    pub project: Option<String>,
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct AgentUsage {
     #[serde(default)]
@@ -59,6 +80,8 @@ pub struct AgentUsage {
     pub by_project: Vec<NamedBucket>,
     #[serde(default)]
     pub recent_sessions: Vec<SessionRecord>,
+    #[serde(default)]
+    pub active_sessions: Vec<ActiveSession>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]

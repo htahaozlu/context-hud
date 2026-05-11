@@ -41,6 +41,9 @@ NOW = time.time()
 WIN_SESSION = 5 * 3600
 WIN_WEEK = 7 * 86400
 WIN_30D = 30 * 86400
+# A session is "active" if its last turn is within this window. 30 min covers
+# slow human-in-the-loop pauses without surfacing stale sessions as live.
+ACTIVE_WINDOW = 30 * 60
 
 
 def parse_iso(value):
@@ -76,7 +79,27 @@ def empty_block():
         "by_model": [],
         "by_project": [],
         "recent_sessions": [],
+        "active_sessions": [],
     }
+
+
+def build_active_sessions(per_session):
+    """Return list of session dicts where last_ts is within ACTIVE_WINDOW."""
+    actives = []
+    for path, s in per_session.items():
+        if NOW - s["last_ts"] > ACTIVE_WINDOW:
+            continue
+        actives.append({
+            "id": os.path.basename(path).rsplit(".", 1)[0],
+            "tokens": s["tokens"],
+            "started_at": datetime.fromtimestamp(s["first_ts"], tz=timezone.utc).isoformat().replace("+00:00", "Z"),
+            "last_turn_at": datetime.fromtimestamp(s["last_ts"], tz=timezone.utc).isoformat().replace("+00:00", "Z"),
+            "model": s["model"],
+            "cwd": s["cwd"],
+            "project": project_name_from_cwd(s["cwd"]),
+        })
+    actives.sort(key=lambda x: x["last_turn_at"], reverse=True)
+    return actives
 
 
 def claude_context_window(model):
@@ -263,6 +286,7 @@ def collect_claude():
     out.update(bucket_aggregates(sessions))
     recent.sort(key=lambda r: r["ended_at"], reverse=True)
     out["recent_sessions"] = recent[:20]
+    out["active_sessions"] = build_active_sessions(per_session)
     return out
 
 
@@ -375,6 +399,7 @@ def collect_codex():
     out.update(bucket_aggregates(sessions))
     recent.sort(key=lambda r: r["ended_at"], reverse=True)
     out["recent_sessions"] = recent[:20]
+    out["active_sessions"] = build_active_sessions(per_session)
     return out
 
 

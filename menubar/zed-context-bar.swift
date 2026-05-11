@@ -193,6 +193,15 @@ struct ToolSummary {
     let lastModel: String?
 }
 
+struct ActiveSession {
+    let id: String
+    let tokens: UInt64
+    let project: String
+    let model: String?
+    let lastTurn: Date?
+    let started: Date?
+}
+
 struct Agent {
     let name: String
     let session5h: UInt64
@@ -204,6 +213,7 @@ struct Agent {
     let ctxWindow: UInt64?
     let lastTurn: Date?
     let sessionStarted: Date?
+    let activeSessions: [ActiveSession]
 
     /// Returns project basename (last path segment) or "—".
     var project: String {
@@ -266,6 +276,22 @@ final class Hud {
             iso.date(from: $0) ?? isoNoFrac.date(from: $0)
         }
 
+        let actives = (raw["active_sessions"] as? [[String: Any]] ?? []).compactMap { obj -> ActiveSession? in
+            guard let id = obj["id"] as? String else { return nil }
+            let lastRaw = obj["last_turn_at"] as? String
+            let startedRaw = obj["started_at"] as? String
+            let last: Date? = lastRaw.flatMap { iso.date(from: $0) ?? isoNoFrac.date(from: $0) }
+            let st: Date? = startedRaw.flatMap { iso.date(from: $0) ?? isoNoFrac.date(from: $0) }
+            return ActiveSession(
+                id: id,
+                tokens: (obj["tokens"] as? UInt64) ?? UInt64(obj["tokens"] as? Int ?? 0),
+                project: (obj["project"] as? String) ?? "—",
+                model: obj["model"] as? String,
+                lastTurn: last,
+                started: st
+            )
+        }
+
         return Agent(
             name: name,
             session5h: (raw["session_5h_tokens"] as? UInt64) ?? UInt64(raw["session_5h_tokens"] as? Int ?? 0),
@@ -276,7 +302,8 @@ final class Hud {
             ctxPct: raw["last_context_pct"] as? Double,
             ctxWindow: (raw["last_context_window"] as? UInt64) ?? (raw["last_context_window"] as? Int).map(UInt64.init),
             lastTurn: ts,
-            sessionStarted: started
+            sessionStarted: started,
+            activeSessions: actives
         )
     }
 
@@ -888,6 +915,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             ]
         )
         menu.addItem(detailItem)
+
+        // If more than one session is live concurrently for this agent, render
+        // a row per session so 3-5 parallel sessions stay visible. Skip the
+        // top one (already represented by the header line above).
+        if a.activeSessions.count > 1 {
+            let topId = a.activeSessions.first?.id
+            for sess in a.activeSessions where sess.id != topId {
+                let tok = Hud.formatTokens(sess.tokens)
+                let when = sess.lastTurn.map { Hud.relative($0) } ?? "—"
+                let proj = sess.project
+                let model = sess.model ?? "—"
+                let line = "      \(theme.inactiveDot) \(proj)  \(detailSep)  \(tok)  \(detailSep)  \(model)  \(detailSep)  \(when)"
+                let item = NSMenuItem()
+                item.isEnabled = false
+                item.attributedTitle = NSAttributedString(
+                    string: line,
+                    attributes: [
+                        .font: NSFont.menuFont(ofSize: NSFont.smallSystemFontSize),
+                        .foregroundColor: NSColor.tertiaryLabelColor,
+                    ]
+                )
+                menu.addItem(item)
+            }
+        }
     }
 
     // MARK: - NSMenuDelegate (live theme preview)
