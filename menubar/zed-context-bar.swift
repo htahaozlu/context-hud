@@ -143,6 +143,48 @@ final class SeparatorStore {
     }
 }
 
+/// What to render in the menubar title and in what order.
+enum DisplayElement: String, CaseIterable {
+    case agent, project, pct
+    var label: String {
+        switch self {
+        case .agent: return "Agent name"
+        case .project: return "Project (cwd)"
+        case .pct: return "Context %"
+        }
+    }
+}
+
+struct DisplayItem {
+    let element: DisplayElement
+    var enabled: Bool
+}
+
+final class DisplayStore {
+    static let key = "displayItems"
+    static var items: [DisplayItem] {
+        if let arr = UserDefaults.standard.array(forKey: key) as? [[String: Any]] {
+            var parsed: [DisplayItem] = []
+            var seen = Set<DisplayElement>()
+            for dict in arr {
+                if let id = dict["id"] as? String, let elem = DisplayElement(rawValue: id), !seen.contains(elem) {
+                    parsed.append(DisplayItem(element: elem, enabled: (dict["enabled"] as? Bool) ?? true))
+                    seen.insert(elem)
+                }
+            }
+            for elem in DisplayElement.allCases where !seen.contains(elem) {
+                parsed.append(DisplayItem(element: elem, enabled: true))
+            }
+            return parsed
+        }
+        return DisplayElement.allCases.map { DisplayItem(element: $0, enabled: true) }
+    }
+    static func save(_ items: [DisplayItem]) {
+        let arr: [[String: Any]] = items.map { ["id": $0.element.rawValue, "enabled": $0.enabled] }
+        UserDefaults.standard.set(arr, forKey: key)
+    }
+}
+
 struct ToolSummary {
     let name: String
     let sessions7d: Int
@@ -371,10 +413,111 @@ final class ThemeCardView: NSView {
     }
 }
 
+/// Manages the menubar title element list: drag-to-reorder rows with a
+/// checkbox per element. Persists to `DisplayStore` on every change.
+final class DisplayTableController: NSObject, NSTableViewDataSource, NSTableViewDelegate {
+    private var items: [DisplayItem] = DisplayStore.items
+    var onChange: (() -> Void)?
+    let tableView = NSTableView()
+    let scrollView = NSScrollView()
+    private static let dragType = NSPasteboard.PasteboardType("com.zedcontext.bar.displayItem.row")
+
+    override init() {
+        super.init()
+        let col = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("row"))
+        col.title = ""
+        col.width = 320
+        tableView.addTableColumn(col)
+        tableView.headerView = nil
+        tableView.rowHeight = 28
+        tableView.usesAlternatingRowBackgroundColors = false
+        tableView.backgroundColor = .clear
+        tableView.gridStyleMask = []
+        tableView.intercellSpacing = NSSize(width: 0, height: 4)
+        tableView.dataSource = self
+        tableView.delegate = self
+        tableView.registerForDraggedTypes([Self.dragType])
+        tableView.setDraggingSourceOperationMask(.move, forLocal: true)
+
+        scrollView.documentView = tableView
+        scrollView.hasVerticalScroller = false
+        scrollView.drawsBackground = false
+        scrollView.borderType = .lineBorder
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+    }
+
+    func numberOfRows(in tableView: NSTableView) -> Int { items.count }
+
+    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        let item = items[row]
+        let cell = NSView()
+        let handle = NSTextField(labelWithString: "⠿")
+        handle.font = NSFont.systemFont(ofSize: 13)
+        handle.textColor = .tertiaryLabelColor
+        handle.translatesAutoresizingMaskIntoConstraints = false
+        let checkbox = NSButton(checkboxWithTitle: item.element.label,
+                                target: self, action: #selector(toggleEnabled(_:)))
+        checkbox.state = item.enabled ? .on : .off
+        checkbox.tag = row
+        checkbox.translatesAutoresizingMaskIntoConstraints = false
+        cell.addSubview(handle)
+        cell.addSubview(checkbox)
+        NSLayoutConstraint.activate([
+            handle.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 8),
+            handle.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+            checkbox.leadingAnchor.constraint(equalTo: handle.trailingAnchor, constant: 10),
+            checkbox.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+        ])
+        return cell
+    }
+
+    @objc private func toggleEnabled(_ sender: NSButton) {
+        guard sender.tag >= 0, sender.tag < items.count else { return }
+        items[sender.tag].enabled = (sender.state == .on)
+        persist()
+    }
+
+    // Drag source
+    func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> NSPasteboardWriting? {
+        let p = NSPasteboardItem()
+        p.setString("\(row)", forType: Self.dragType)
+        return p
+    }
+
+    func tableView(_ tableView: NSTableView,
+                   validateDrop info: NSDraggingInfo,
+                   proposedRow row: Int,
+                   proposedDropOperation op: NSTableView.DropOperation) -> NSDragOperation {
+        return op == .above ? .move : []
+    }
+
+    func tableView(_ tableView: NSTableView,
+                   acceptDrop info: NSDraggingInfo,
+                   row: Int,
+                   dropOperation: NSTableView.DropOperation) -> Bool {
+        guard let pbItems = info.draggingPasteboard.pasteboardItems,
+              let str = pbItems.first?.string(forType: Self.dragType),
+              let from = Int(str) else { return false }
+        let target = from < row ? row - 1 : row
+        if target == from { return false }
+        let moved = items.remove(at: from)
+        items.insert(moved, at: max(0, min(items.count, target)))
+        tableView.reloadData()
+        persist()
+        return true
+    }
+
+    private func persist() {
+        DisplayStore.save(items)
+        onChange?()
+    }
+}
+
 final class SettingsViewController: NSViewController {
     var onThemeChange: ((String) -> Void)?
     private var cardViews: [(ThemeCardView, Theme)] = []
     private var sepControl: NSSegmentedControl?
+    private let displayTable = DisplayTableController()
 
     override func loadView() { view = NSView() }
     override func viewDidLoad() { super.viewDidLoad(); buildUI() }
@@ -437,7 +580,19 @@ final class SettingsViewController: NSViewController {
         seg.translatesAutoresizingMaskIntoConstraints = false
         sepControl = seg
 
-        let mainStack = NSStackView(views: [titleLabel, descLabel, themeGrid, sepTitle, sepDesc, seg])
+        // Display elements section — reorder + toggle each menubar title element.
+        let dispTitle = NSTextField(labelWithString: "Menubar Title")
+        dispTitle.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        let dispDesc = NSTextField(labelWithString: "Toggle and drag to reorder which parts appear in the menubar title.")
+        dispDesc.font = NSFont.systemFont(ofSize: 11)
+        dispDesc.textColor = .secondaryLabelColor
+        displayTable.onChange = { [weak self] in self?.onThemeChange?(ThemeStore.current.id) }
+
+        let mainStack = NSStackView(views: [
+            titleLabel, descLabel, themeGrid,
+            sepTitle, sepDesc, seg,
+            dispTitle, dispDesc, displayTable.scrollView,
+        ])
         mainStack.orientation = .vertical; mainStack.alignment = .leading; mainStack.spacing = 12
         mainStack.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(mainStack)
@@ -449,6 +604,8 @@ final class SettingsViewController: NSViewController {
             container.widthAnchor.constraint(equalTo: scrollView.widthAnchor),
             row1.widthAnchor.constraint(equalTo: themeGrid.widthAnchor),
             row2.widthAnchor.constraint(equalTo: themeGrid.widthAnchor),
+            displayTable.scrollView.widthAnchor.constraint(equalToConstant: 360),
+            displayTable.scrollView.heightAnchor.constraint(equalToConstant: 120),
         ] + cardViews.map { $0.0.heightAnchor.constraint(equalToConstant: 76) })
     }
 
@@ -511,13 +668,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSApp.setActivationPolicy(.accessory)
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        if let button = statusItem.button {
-            let image = NSImage(systemSymbolName: "sparkles",
-                                accessibilityDescription: "zed-context")
-            image?.isTemplate = true
-            button.image = image
-            button.imagePosition = .imageLeading
-        }
+        // No icon — title-only menubar entry to save horizontal space.
 
         refresh()
 
@@ -668,12 +819,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let rawSep = SeparatorStore.current
         let sep = rawSep.isEmpty ? " " : " \(rawSep) "
 
+        let visible = DisplayStore.items.filter { $0.enabled }
         let s = NSMutableAttributedString()
-        s.append(NSAttributedString(string: " \(agent)", attributes: agentAttrs))
-        s.append(NSAttributedString(string: sep, attributes: dim))
-        s.append(NSAttributedString(string: project, attributes: projectAttrs))
-        s.append(NSAttributedString(string: sep, attributes: dim))
-        s.append(NSAttributedString(string: pctStr, attributes: ctxAttrs))
+        s.append(NSAttributedString(string: " ", attributes: agentAttrs))
+        if visible.isEmpty {
+            return s
+        }
+        for (i, item) in visible.enumerated() {
+            if i > 0 {
+                s.append(NSAttributedString(string: sep, attributes: dim))
+            }
+            switch item.element {
+            case .agent:
+                s.append(NSAttributedString(string: agent, attributes: agentAttrs))
+            case .project:
+                s.append(NSAttributedString(string: project, attributes: projectAttrs))
+            case .pct:
+                s.append(NSAttributedString(string: pctStr, attributes: ctxAttrs))
+            }
+        }
         return s
     }
 
