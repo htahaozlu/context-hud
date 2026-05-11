@@ -4,7 +4,7 @@
 //! report that the menubar app opens in a WKWebView. The report is a single
 //! full-page tabbed layout with no external assets.
 
-use crate::usage_signal::{AgentUsage, NamedBucket, SessionRecord, TimeBucket, UsageSnapshot};
+use crate::usage_signal::{AgentUsage, NamedBucket, SessionRecord, TimeBucket, ToolSummary, UsageSnapshot};
 
 pub fn render(snap: &UsageSnapshot) -> String {
     let updated = snap.collected_at.as_deref().unwrap_or("-");
@@ -42,10 +42,43 @@ fn panel(id: &str, active: bool, body: &str) -> String {
 }
 
 fn render_today(snap: &UsageSnapshot) -> String {
-    format!(
+    let mut out = format!(
         r#"<section class="today-grid">{}{}</section>"#,
         today_agent("Claude", &snap.claude),
         today_agent("Codex", &snap.codex)
+    );
+    if !snap.others.is_empty() {
+        out.push_str(&render_other_tools(&snap.others));
+    }
+    out
+}
+
+fn render_other_tools(tools: &[ToolSummary]) -> String {
+    let mut rows = String::new();
+    for t in tools {
+        let sessions = if t.sessions_7d > 0 {
+            format!("{} this week", t.sessions_7d)
+        } else {
+            "—".to_string()
+        };
+        let tokens = if t.tokens_7d > 0 {
+            format_tokens(t.tokens_7d)
+        } else {
+            "—".to_string()
+        };
+        let last = t.last_used.as_deref().map(format_time).unwrap_or_else(|| "—".to_string());
+        let model = t.last_model.as_deref().unwrap_or("—");
+        rows.push_str(&format!(
+            r#"<tr><td><strong>{}</strong></td><td>{}</td><td class="num">{}</td><td class="muted">{}</td><td class="muted">{}</td></tr>"#,
+            html_escape(&t.name),
+            html_escape(model),
+            tokens,
+            sessions,
+            html_escape(&last),
+        ));
+    }
+    format!(
+        r#"<section class="other-tools"><h2>Other AI Tools</h2><div class="table-card wide"><table><thead><tr><th>tool</th><th>last model</th><th>7d tokens</th><th>7d sessions</th><th>last used</th></tr></thead><tbody>{rows}</tbody></table></div></section>"#
     )
 }
 
@@ -341,6 +374,8 @@ svg.chart text.label-x.end { text-anchor:end; }
 .tables { display:grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap:12px; margin-top:16px; }
 .table-card { background:var(--panel2); border:1px solid var(--border); border-radius:8px; padding:14px; overflow-x:auto; }
 .table-card.wide { margin-top:16px; }
+.other-tools { margin-top:24px; }
+.other-tools h2 { margin-bottom:12px; font-size:13px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:0.06em; }
 table { width:100%; border-collapse:collapse; font-size:12px; }
 th { text-align:left; padding:6px 8px; font-weight:500; color:var(--muted); border-bottom:1px solid var(--border); white-space:nowrap; }
 td { padding:6px 8px; border-bottom:1px solid rgba(255,255,255,0.04); vertical-align:top; }

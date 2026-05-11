@@ -143,6 +143,14 @@ final class SeparatorStore {
     }
 }
 
+struct ToolSummary {
+    let name: String
+    let sessions7d: Int
+    let tokens7d: UInt64
+    let lastUsed: String?
+    let lastModel: String?
+}
+
 struct Agent {
     let name: String
     let session5h: UInt64
@@ -168,12 +176,12 @@ final class Hud {
         self.path = "\(NSHomeDirectory())/.zed-context/hud.json"
     }
 
-    func load() -> (active: Agent?, all: [Agent]) {
+    func load() -> (active: Agent?, all: [Agent], others: [ToolSummary]) {
         guard
             let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
             let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else {
-            return (nil, [])
+            return (nil, [], [])
         }
 
         let claude = parse(root["claude"] as? [String: Any], name: "Claude")
@@ -182,7 +190,22 @@ final class Hud {
         let active = all.max(by: {
             ($0.lastTurn ?? .distantPast) < ($1.lastTurn ?? .distantPast)
         })
-        return (active, all)
+        let others = parseOthers(root["others"] as? [[String: Any]])
+        return (active, all, others)
+    }
+
+    private func parseOthers(_ raw: [[String: Any]]?) -> [ToolSummary] {
+        guard let raw else { return [] }
+        return raw.compactMap { obj in
+            guard let name = obj["name"] as? String, !name.isEmpty else { return nil }
+            return ToolSummary(
+                name: name,
+                sessions7d: obj["sessions_7d"] as? Int ?? 0,
+                tokens7d: (obj["tokens_7d"] as? UInt64) ?? UInt64(obj["tokens_7d"] as? Int ?? 0),
+                lastUsed: obj["last_used"] as? String,
+                lastModel: obj["last_model"] as? String
+            )
+        }
     }
 
     private func parse(_ raw: [String: Any]?, name: String) -> Agent? {
@@ -512,7 +535,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc func refreshNow() { refresh() }
 
     func refresh() {
-        let (active, all) = hud.load()
+        let (active, all, others) = hud.load()
         lastActive = active
         let titleTheme = previewTheme ?? ThemeStore.current
         statusItem.button?.attributedTitle = composeTitle(active: active, theme: titleTheme)
@@ -523,7 +546,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             empty.isEnabled = false
             menu.addItem(empty)
         } else {
-            // Active first, then the rest. Each agent gets a 2-line block.
             let ordered = (active.map { [$0] } ?? []) + all.filter { $0.name != active?.name }
             for (i, a) in ordered.enumerated() {
                 let isActive = (a.name == active?.name)
@@ -531,6 +553,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 if i < ordered.count - 1 {
                     menu.addItem(NSMenuItem.separator())
                 }
+            }
+        }
+
+        // Other AI tools detected on this system
+        if !others.isEmpty {
+            menu.addItem(NSMenuItem.separator())
+            let header = NSMenuItem(title: "Other Tools", action: nil, keyEquivalent: "")
+            header.isEnabled = false
+            header.attributedTitle = NSAttributedString(
+                string: "OTHER TOOLS",
+                attributes: [
+                    .font: NSFont.menuFont(ofSize: NSFont.smallSystemFontSize - 1),
+                    .foregroundColor: NSColor.tertiaryLabelColor,
+                ]
+            )
+            menu.addItem(header)
+            for tool in others {
+                appendTool(menu: menu, tool: tool)
             }
         }
 
@@ -705,6 +745,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func menuDidClose(_ menu: NSMenu) {
         previewTheme = nil
         statusItem.button?.attributedTitle = composeTitle(active: lastActive)
+    }
+
+    private func appendTool(menu: NSMenu, tool: ToolSummary) {
+        let item = NSMenuItem()
+        item.isEnabled = false
+        let tok = tool.tokens7d > 0 ? "  \(Hud.formatTokens(tool.tokens7d))" : ""
+        let sess = tool.sessions7d > 0 ? "  \(tool.sessions7d)×/wk" : ""
+        let model = tool.lastModel.map { "  \($0)" } ?? ""
+        let line = "\(tool.name)\(tok)\(sess)\(model)"
+        item.attributedTitle = NSAttributedString(
+            string: line,
+            attributes: [
+                .font: NSFont.menuFont(ofSize: NSFont.smallSystemFontSize),
+                .foregroundColor: NSColor.secondaryLabelColor,
+            ]
+        )
+        menu.addItem(item)
     }
 
     @objc func pickTheme(_ sender: NSMenuItem) {

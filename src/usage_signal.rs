@@ -100,11 +100,31 @@ pub struct SessionRecord {
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct ToolSummary {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub sessions_7d: u64,
+    #[serde(default)]
+    pub sessions_today: u64,
+    #[serde(default)]
+    pub tokens_7d: u64,
+    #[serde(default)]
+    pub tokens_today: u64,
+    #[serde(default)]
+    pub last_used: Option<String>,
+    #[serde(default)]
+    pub last_model: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct UsageSnapshot {
     #[serde(default)]
     pub claude: AgentUsage,
     #[serde(default)]
     pub codex: AgentUsage,
+    #[serde(default)]
+    pub others: Vec<ToolSummary>,
     #[serde(default)]
     pub collected_at: Option<String>,
     #[serde(default)]

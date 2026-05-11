@@ -378,10 +378,240 @@ def collect_codex():
     return out
 
 
+# ── Additional AI tool probes ─────────────────────────────────────────────────
+
+def empty_tool(name):
+    return {
+        "name": name,
+        "sessions_7d": 0,
+        "sessions_today": 0,
+        "tokens_7d": 0,
+        "tokens_today": 0,
+        "last_used": None,
+        "last_model": None,
+    }
+
+
+def probe_llm_cli():
+    """Simon Willison's 'llm' CLI — ~/.config/io.datasette.llm/logs.db"""
+    try:
+        import sqlite3
+    except ImportError:
+        return None
+    db = os.path.expanduser("~/.config/io.datasette.llm/logs.db")
+    if not os.path.exists(db):
+        return None
+    try:
+        conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        cur = conn.cursor()
+        rows = cur.execute(
+            """SELECT datetime_utc,
+                      COALESCE(input_tokens,0)+COALESCE(output_tokens,0),
+                      model
+               FROM responses
+               WHERE datetime_utc >= datetime('now','-7 days')
+               ORDER BY datetime_utc DESC LIMIT 2000"""
+        ).fetchall()
+        conn.close()
+    except Exception:
+        return None
+    if not rows:
+        return None
+    out = empty_tool("LLM")
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    session_days, today_count = set(), 0
+    for (dt_utc, tokens, model) in rows:
+        if dt_utc:
+            day = dt_utc[:10]
+            session_days.add(day)
+            if day == today:
+                today_count += 1
+                out["tokens_today"] += tokens or 0
+        out["tokens_7d"] += tokens or 0
+        if out["last_used"] is None:
+            out["last_used"] = dt_utc
+            out["last_model"] = model
+    out["sessions_7d"] = len(session_days)
+    out["sessions_today"] = today_count
+    return out
+
+
+def probe_gemini_cli():
+    """Google Gemini CLI — ~/.gemini/ JSONL sessions"""
+    home = os.environ.get("HOME", "")
+    if not home:
+        return None
+    candidates = [
+        os.path.join(home, ".gemini", "sessions"),
+        os.path.join(home, ".gemini"),
+        os.path.join(home, ".config", "gemini", "sessions"),
+    ]
+    base = next((d for d in candidates if os.path.isdir(d)), None)
+    if not base:
+        return None
+    out = empty_tool("Gemini")
+    found = False
+    for path in glob.glob(os.path.join(base, "**", "*.jsonl"), recursive=True) + \
+                glob.glob(os.path.join(base, "*.jsonl")):
+        try:
+            mtime = os.path.getmtime(path)
+        except OSError:
+            continue
+        if NOW - mtime > WIN_WEEK:
+            continue
+        found = True
+        out["sessions_7d"] += 1
+        if NOW - mtime <= 86400:
+            out["sessions_today"] += 1
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as fh:
+                for line in fh:
+                    try:
+                        obj = json.loads(line)
+                    except Exception:
+                        continue
+                    u = obj.get("usageMetadata") or obj.get("usage") or {}
+                    if isinstance(u, dict):
+                        total = int(u.get("totalTokenCount") or
+                                    (int(u.get("promptTokenCount", 0) or 0) +
+                                     int(u.get("candidatesTokenCount", 0) or 0)))
+                        out["tokens_7d"] += total
+                        if NOW - mtime <= 86400:
+                            out["tokens_today"] += total
+                    if out["last_used"] is None:
+                        ts = obj.get("timestamp") or obj.get("createTime")
+                        if ts:
+                            out["last_used"] = ts
+                    if not out["last_model"]:
+                        out["last_model"] = obj.get("model")
+        except OSError:
+            continue
+    return out if found else None
+
+
+def probe_aider():
+    """Aider — check ~/.aider/ for recent activity (no full home scan)."""
+    home = os.environ.get("HOME", "")
+    if not home:
+        return None
+    aider_dir = os.path.join(home, ".aider")
+    if not os.path.isdir(aider_dir):
+        return None
+    found_paths = []
+    # Check only within ~/.aider/ — safe, bounded directory
+    for path in glob.glob(os.path.join(aider_dir, "**", "*.jsonl"), recursive=True) + \
+                glob.glob(os.path.join(aider_dir, "*.jsonl")) + \
+                glob.glob(os.path.join(aider_dir, "**", "*.yaml"), recursive=True):
+        try:
+            mtime = os.path.getmtime(path)
+        except OSError:
+            continue
+        if NOW - mtime <= WIN_WEEK:
+            found_paths.append((mtime, path))
+    if not found_paths:
+        return None
+    found_paths.sort(reverse=True)
+    out = empty_tool("Aider")
+    out["sessions_7d"] = len(found_paths)
+    out["sessions_today"] = sum(1 for (m, _) in found_paths if NOW - m <= 86400)
+    latest_mtime, _ = found_paths[0]
+    out["last_used"] = datetime.fromtimestamp(latest_mtime, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+    return out
+
+
+# Shell history AI tool detection
+_HISTORY_TOOLS = [
+    ("aider", "Aider"),
+    ("sgpt", "ShellGPT"),
+    ("mods", "Mods"),
+    ("fabric", "Fabric"),
+    ("ollama", "Ollama"),
+    ("tgpt", "tGPT"),
+    ("continue", "Continue"),
+    ("copilot", "Copilot CLI"),
+    ("gemini", "Gemini"),
+]
+
+
+def probe_shell_history():
+    """Scan ~/.zsh_history (extended format) for AI CLI invocations in last 7 days."""
+    home = os.environ.get("HOME", "")
+    if not home:
+        return []
+    hist_path = os.path.join(home, ".zsh_history")
+    if not os.path.exists(hist_path):
+        return []
+    cutoff = NOW - WIN_WEEK
+    counts = defaultdict(lambda: {"count": 0, "last_ts": 0})
+    try:
+        with open(hist_path, "rb") as fh:
+            fh.seek(0, 2)
+            size = fh.tell()
+            fh.seek(max(0, size - 2 * 1024 * 1024))
+            content = fh.read().decode("utf-8", errors="replace")
+        ts = None
+        for line in content.splitlines():
+            if line.startswith(": "):
+                parts = line.split(";", 1)
+                if len(parts) == 2:
+                    try:
+                        ts = int(parts[0].split(":")[1])
+                    except Exception:
+                        ts = None
+                    cmd = parts[1].strip()
+                else:
+                    cmd = ""
+            else:
+                cmd = line.strip()
+                # no timestamp available for this line
+            if ts is None or ts < cutoff:
+                continue
+            for binary, display in _HISTORY_TOOLS:
+                if cmd == binary or cmd.startswith(binary + " ") or cmd.startswith(binary + "\t"):
+                    counts[display]["count"] += 1
+                    if ts > counts[display]["last_ts"]:
+                        counts[display]["last_ts"] = ts
+    except Exception:
+        return []
+    results = []
+    for display, data in counts.items():
+        if data["count"] == 0:
+            continue
+        t = empty_tool(display)
+        t["sessions_7d"] = data["count"]
+        t["sessions_today"] = 0  # not tracked at daily granularity from history
+        if data["last_ts"]:
+            t["last_used"] = datetime.fromtimestamp(data["last_ts"], tz=timezone.utc).isoformat().replace("+00:00", "Z")
+        results.append(t)
+    return results
+
+
+def collect_others():
+    tools = []
+    for probe_fn in [probe_llm_cli, probe_gemini_cli, probe_aider]:
+        try:
+            result = probe_fn()
+        except Exception:
+            result = None
+        if result is not None:
+            tools.append(result)
+    existing = {t["name"].lower() for t in tools}
+    try:
+        for t in probe_shell_history():
+            if t["name"].lower() not in existing:
+                tools.append(t)
+                existing.add(t["name"].lower())
+    except Exception:
+        pass
+    tools.sort(key=lambda t: t["last_used"] or "", reverse=True)
+    return tools
+
+
 def main():
     snap = {
         "claude": collect_claude(),
         "codex": collect_codex(),
+        "others": collect_others(),
         "collected_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "source": "python3",
     }
