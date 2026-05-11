@@ -30,9 +30,12 @@
 
 pub mod agent_context;
 pub mod context_engine;
+pub mod detail_html;
 pub mod git_signal;
+pub mod hud;
 pub mod state_writer;
 pub mod time_windows;
+pub mod usage_signal;
 
 #[cfg(target_arch = "wasm32")]
 pub mod auto_refresh;

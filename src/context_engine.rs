@@ -13,9 +13,10 @@ use zed_extension_api as zed;
 use crate::{
     git_signal::{ChangeSummary, CommitSummary, GitSignals},
     time_windows::{NOW_WINDOW, SESSION_WINDOW, WEEK_WINDOW},
+    usage_signal::UsageSnapshot,
 };
 #[cfg(target_arch = "wasm32")]
-use crate::git_signal;
+use crate::{git_signal, usage_signal};
 
 #[derive(Clone, Debug, Serialize)]
 pub struct TouchedFile {
@@ -50,6 +51,8 @@ pub struct ContextSnapshot {
     pub session: WindowSummary,
     pub week: WindowSummary,
     pub assistant_memory: AssistantMemory,
+    #[serde(default)]
+    pub usage: UsageSnapshot,
 }
 
 #[derive(Clone, Debug)]
@@ -70,7 +73,10 @@ impl ContextEngine {
         let root = PathBuf::from(worktree.root_path());
         let git = git_signal::collect(worktree)?;
         let touched_files = collect_file_observations(&root)?;
-        assemble(root, git, touched_files)
+        let usage = usage_signal::collect(worktree);
+        let mut snapshot = assemble(root, git, touched_files)?;
+        snapshot.usage = usage;
+        Ok(snapshot)
     }
 }
 
@@ -109,6 +115,7 @@ pub fn assemble(
                 latest_summary: build_assistant_memory(&git, &session_files),
                 thread_refs: Vec::new(),
             },
+            usage: UsageSnapshot::default(),
         };
 
         Ok(snapshot)

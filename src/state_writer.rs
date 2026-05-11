@@ -5,6 +5,7 @@ use std::{
 
 use crate::agent_context;
 use crate::context_engine::{ContextSnapshot, render_window_markdown};
+use crate::hud;
 
 #[cfg(target_arch = "wasm32")]
 use zed_extension_api::serde_json;
@@ -17,6 +18,7 @@ pub struct StateWriteResult {
     pub week_brief_path: PathBuf,
     pub agent_brief_path: PathBuf,
     pub claude_brief_path: PathBuf,
+    pub hud_path: PathBuf,
 }
 
 /// Write all artifacts. Each file is staged to a sibling `*.tmp` path then
@@ -34,6 +36,7 @@ pub fn write(root: &Path, snapshot: &ContextSnapshot) -> Result<StateWriteResult
     let week_brief_path = state_dir.join("brief-week.md");
     let agent_brief_path = state_dir.join("AGENT.md");
     let claude_brief_path = root.join("CLAUDE.md");
+    let hud_path = state_dir.join("hud.md");
 
     let json = serde_json::to_string_pretty(snapshot)
         .map_err(|error| format!("failed to serialize state.json: {error}"))?;
@@ -53,6 +56,7 @@ pub fn write(root: &Path, snapshot: &ContextSnapshot) -> Result<StateWriteResult
     )?;
     atomic_write(&agent_brief_path, agent_context::render(snapshot).as_bytes())?;
     atomic_write(&claude_brief_path, agent_context::render(snapshot).as_bytes())?;
+    atomic_write(&hud_path, hud::render(snapshot, &snapshot.usage).as_bytes())?;
 
     Ok(StateWriteResult {
         state_path,
@@ -61,6 +65,7 @@ pub fn write(root: &Path, snapshot: &ContextSnapshot) -> Result<StateWriteResult
         week_brief_path,
         agent_brief_path,
         claude_brief_path,
+        hud_path,
     })
 }
 

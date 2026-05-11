@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use zed_extension_api::{self as zed, Result};
 
-use crate::{context_engine::ContextEngine, state_writer};
+use crate::{context_engine::ContextEngine, hud, state_writer};
 
 pub fn run(
     command: zed::SlashCommand,
@@ -11,6 +11,7 @@ pub fn run(
     match command.name.as_str() {
         "hello" => run_hello(worktree),
         "brief" => run_brief(worktree),
+        "hud" => run_hud(worktree),
         "doctor" => run_doctor(worktree),
         _ => Err(format!("unknown slash command: {}", command.name)),
     }
@@ -87,6 +88,30 @@ fn run_brief(worktree: Option<&zed::Worktree>) -> Result<zed::SlashCommandOutput
         format_list(&snapshot.week.themes),
         snapshot.assistant_memory.latest_summary
     );
+
+    Ok(zed::SlashCommandOutput {
+        text,
+        sections: vec![],
+    })
+}
+
+fn run_hud(worktree: Option<&zed::Worktree>) -> Result<zed::SlashCommandOutput> {
+    let worktree = worktree.ok_or_else(|| {
+        "No worktree is attached. Run `/hud` inside a project-backed assistant thread.".to_string()
+    })?;
+
+    let snapshot = ContextEngine::generate(worktree)?;
+    let root = PathBuf::from(worktree.root_path());
+
+    let footer = match state_writer::write(&root, &snapshot) {
+        Ok(paths) => format!(
+            "\n_HUD persisted to `{}` (auto-refreshes on every extension interaction)._\n",
+            paths.hud_path.display()
+        ),
+        Err(error) => format!("\n_HUD write skipped: {error}._\n"),
+    };
+
+    let text = format!("{}{}", hud::render(&snapshot, &snapshot.usage), footer);
 
     Ok(zed::SlashCommandOutput {
         text,

@@ -16,6 +16,11 @@ description = "Generate now/session/week context briefs from git and recent file
 requires_argument = false
 tooltip_text = "Refresh the local context brief"
 
+[slash_commands.hud]
+description = "Show always-on Claude Code + Codex usage HUD (5h session, 7d week, context %)"
+requires_argument = false
+tooltip_text = "Open the agent HUD"
+
 [slash_commands.doctor]
 description = "Check worktree, git execution, and state writing inside the Zed runtime"
 requires_argument = false
