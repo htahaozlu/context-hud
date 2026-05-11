@@ -7,29 +7,66 @@
 use crate::usage_signal::{AgentUsage, NamedBucket, SessionRecord, TimeBucket, ToolSummary, UsageSnapshot};
 
 pub fn render(snap: &UsageSnapshot) -> String {
+    let lang = Language::detect();
     let updated = snap.collected_at.as_deref().unwrap_or("-");
     let mut html = String::new();
     html.push_str(HEAD);
     html.push_str(&format!(
-        r#"<header><h1>Agent Usage Detail</h1><div class="muted">Updated {}</div></header>"#,
-        html_escape(updated)
+        r#"<header><h1>{}</h1><div class="muted">{} {}</div></header>"#,
+        lang.text("Agent Usage Detail", "Ajan Kullanım Detayı"),
+        lang.text("Updated", "Güncellendi"),
+        html_escape(updated),
     ));
     html.push_str(
-        r#"<nav class="tabs"><div class="seg-ctrl">
-  <button class="tab-btn active" data-tab="today">Today</button>
-  <button class="tab-btn" data-tab="history">History</button>
-  <button class="tab-btn" data-tab="sessions">Sessions</button>
-  <button class="tab-btn" data-tab="breakdown">Breakdown</button>
+        &format!(r#"<nav class="tabs"><div class="seg-ctrl">
+  <button class="tab-btn active" data-tab="today">{}</button>
+  <button class="tab-btn" data-tab="history">{}</button>
+  <button class="tab-btn" data-tab="sessions">{}</button>
+  <button class="tab-btn" data-tab="breakdown">{}</button>
 </div></nav>"#,
+            lang.text("Today", "Bugün"),
+            lang.text("History", "Geçmiş"),
+            lang.text("Sessions", "Oturumlar"),
+            lang.text("Breakdown", "Kırılım"),
+        ),
     );
     html.push_str(r#"<main>"#);
-    html.push_str(&panel("today", true, &render_today(snap)));
-    html.push_str(&panel("history", false, &render_history(snap)));
-    html.push_str(&panel("sessions", false, &render_sessions(snap)));
-    html.push_str(&panel("breakdown", false, &render_breakdown(snap)));
+    html.push_str(&panel("today", true, &render_today(snap, lang)));
+    html.push_str(&panel("history", false, &render_history(snap, lang)));
+    html.push_str(&panel("sessions", false, &render_sessions(snap, lang)));
+    html.push_str(&panel("breakdown", false, &render_breakdown(snap, lang)));
     html.push_str(r#"</main>"#);
     html.push_str(FOOT);
     html
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Language {
+    En,
+    Tr,
+}
+
+impl Language {
+    fn detect() -> Self {
+        for key in ["LC_ALL", "LC_MESSAGES", "LANG"] {
+            if let Ok(value) = std::env::var(key) {
+                if value.to_ascii_lowercase().starts_with("tr") {
+                    return Self::Tr;
+                }
+                if !value.is_empty() {
+                    return Self::En;
+                }
+            }
+        }
+        Self::En
+    }
+
+    fn text(self, en: &'static str, tr: &'static str) -> &'static str {
+        match self {
+            Self::En => en,
+            Self::Tr => tr,
+        }
+    }
 }
 
 fn panel(id: &str, active: bool, body: &str) -> String {
@@ -41,23 +78,27 @@ fn panel(id: &str, active: bool, body: &str) -> String {
     format!(r#"<div class="{class}" id="tab-{id}">{body}</div>"#)
 }
 
-fn render_today(snap: &UsageSnapshot) -> String {
+fn render_today(snap: &UsageSnapshot, lang: Language) -> String {
     let mut out = format!(
         r#"<section class="today-grid">{}{}</section>"#,
-        today_agent("Claude", &snap.claude),
-        today_agent("Codex", &snap.codex)
+        today_agent("Claude", &snap.claude, lang),
+        today_agent("Codex", &snap.codex, lang)
     );
     if !snap.others.is_empty() {
-        out.push_str(&render_other_tools(&snap.others));
+        out.push_str(&render_other_tools(&snap.others, lang));
     }
     out
 }
 
-fn render_other_tools(tools: &[ToolSummary]) -> String {
+fn render_other_tools(tools: &[ToolSummary], lang: Language) -> String {
     let mut rows = String::new();
     for t in tools {
         let sessions = if t.sessions_7d > 0 {
-            format!("{} this week", t.sessions_7d)
+            if lang == Language::Tr {
+                format!("bu hafta {}", t.sessions_7d)
+            } else {
+                format!("{} this week", t.sessions_7d)
+            }
         } else {
             "—".to_string()
         };
@@ -78,49 +119,55 @@ fn render_other_tools(tools: &[ToolSummary]) -> String {
         ));
     }
     format!(
-        r#"<section class="other-tools"><h2>Other AI Tools</h2><div class="table-card wide"><table><thead><tr><th>tool</th><th>last model</th><th>7d tokens</th><th>7d sessions</th><th>last used</th></tr></thead><tbody>{rows}</tbody></table></div></section>"#
+        r#"<section class="other-tools"><h2>{}</h2><div class="table-card wide"><table><thead><tr><th>{}</th><th>{}</th><th>{}</th><th>{}</th><th>{}</th></tr></thead><tbody>{rows}</tbody></table></div></section>"#,
+        lang.text("Other AI Tools", "Diğer AI Araçları"),
+        lang.text("tool", "araç"),
+        lang.text("last model", "son model"),
+        lang.text("7d tokens", "7g token"),
+        lang.text("7d sessions", "7g oturum"),
+        lang.text("last used", "son kullanım"),
     )
 }
 
-fn today_agent(name: &str, usage: &AgentUsage) -> String {
+fn today_agent(name: &str, usage: &AgentUsage, lang: Language) -> String {
     let mut out = String::new();
     out.push_str(&format!(
         r#"<article class="agent-card"><div class="agent-heading"><h2>{}</h2><span class="status-pill" data-active="{}">{}</span></div>"#,
         html_escape(name),
         usage.active_session_started_at.is_some(),
         if usage.active_session_started_at.is_some() {
-            "active"
+            lang.text("active", "aktif")
         } else {
-            "idle"
+            lang.text("idle", "boşta")
         }
     ));
     out.push_str(r#"<div class="metric-grid">"#);
-    out.push_str(&metric("Active session tokens", &active_session_value(usage)));
-    out.push_str(&metric("30d tokens", &format_tokens(usage.total_tokens_30d)));
+    out.push_str(&metric(lang.text("Active session tokens", "Aktif oturum token"), &active_session_value(usage, lang)));
+    out.push_str(&metric(lang.text("30d tokens", "30g token"), &format_tokens(usage.total_tokens_30d)));
     out.push_str(&metric(
-        "30d sessions",
+        lang.text("30d sessions", "30g oturum"),
         &usage.total_sessions_30d.to_string(),
     ));
     out.push_str(&metric(
-        "Last model",
+        lang.text("Last model", "Son model"),
         usage.last_model.as_deref().unwrap_or("-"),
     ));
-    out.push_str(&metric("Context", &format_pct(usage.last_context_pct)));
-    out.push_str(&metric("Last turn", &last_turn_value(usage)));
+    out.push_str(&metric(lang.text("Context", "Bağlam"), &format_pct(usage.last_context_pct)));
+    out.push_str(&metric(lang.text("Last turn", "Son tur"), &last_turn_value(usage)));
     out.push_str(r#"</div></article>"#);
     out
 }
 
-fn active_session_value(usage: &AgentUsage) -> String {
+fn active_session_value(usage: &AgentUsage, lang: Language) -> String {
     let tokens = format_tokens(usage.active_session_tokens);
     match usage.active_session_started_at.as_deref() {
         Some(started) if usage.active_session_tokens > 0 => format!(
             r#"{tokens}<br><span class="muted">since {}</span>"#,
-            html_escape(&format_time(started))
+            html_escape(&format!("{} {}", lang.text("since", "beri"), format_time(started)))
         ),
         Some(started) => format!(
             r#"0<br><span class="muted">since {}</span>"#,
-            html_escape(&format_time(started))
+            html_escape(&format!("{} {}", lang.text("since", "beri"), format_time(started)))
         ),
         None if usage.active_session_tokens > 0 => tokens,
         None => "-".to_string(),
@@ -143,68 +190,69 @@ fn metric(label: &str, value: &str) -> String {
     )
 }
 
-fn render_history(snap: &UsageSnapshot) -> String {
+fn render_history(snap: &UsageSnapshot, lang: Language) -> String {
     format!(
         r#"<div class="stack">{}{}</div>"#,
-        history_agent("Claude", &snap.claude),
-        history_agent("Codex", &snap.codex)
+        history_agent("Claude", &snap.claude, lang),
+        history_agent("Codex", &snap.codex, lang)
     )
 }
 
-fn history_agent(name: &str, usage: &AgentUsage) -> String {
+fn history_agent(name: &str, usage: &AgentUsage, lang: Language) -> String {
     let mut out = String::new();
     out.push_str(&format!(
         r#"<section class="agent-section"><h2>{}</h2><div class="charts">"#,
         html_escape(name)
     ));
-    out.push_str(&chart_card("Daily", &usage.by_day));
-    out.push_str(&chart_card("Weekly", &usage.by_week));
-    out.push_str(&chart_card("Monthly", &usage.by_month));
+    out.push_str(&chart_card(lang.text("Daily", "Günlük"), &usage.by_day, lang));
+    out.push_str(&chart_card(lang.text("Weekly", "Haftalık"), &usage.by_week, lang));
+    out.push_str(&chart_card(lang.text("Monthly", "Aylık"), &usage.by_month, lang));
     out.push_str(r#"</div></section>"#);
     out
 }
 
-fn render_sessions(snap: &UsageSnapshot) -> String {
+fn render_sessions(snap: &UsageSnapshot, lang: Language) -> String {
     format!(
         r#"<div class="stack">{}{}</div>"#,
-        sessions_agent("Claude", &snap.claude.recent_sessions),
-        sessions_agent("Codex", &snap.codex.recent_sessions)
+        sessions_agent("Claude", &snap.claude.recent_sessions, lang),
+        sessions_agent("Codex", &snap.codex.recent_sessions, lang)
     )
 }
 
-fn sessions_agent(name: &str, sessions: &[SessionRecord]) -> String {
+fn sessions_agent(name: &str, sessions: &[SessionRecord], lang: Language) -> String {
     format!(
         r#"<section class="agent-section"><h2>{}</h2>{}</section>"#,
         html_escape(name),
-        recent_sessions_table(sessions)
+        recent_sessions_table(sessions, lang)
     )
 }
 
-fn render_breakdown(snap: &UsageSnapshot) -> String {
+fn render_breakdown(snap: &UsageSnapshot, lang: Language) -> String {
     format!(
         r#"<div class="stack">{}{}</div>"#,
-        breakdown_agent("Claude", &snap.claude),
-        breakdown_agent("Codex", &snap.codex)
+        breakdown_agent("Claude", &snap.claude, lang),
+        breakdown_agent("Codex", &snap.codex, lang)
     )
 }
 
-fn breakdown_agent(name: &str, usage: &AgentUsage) -> String {
+fn breakdown_agent(name: &str, usage: &AgentUsage, lang: Language) -> String {
     let mut out = String::new();
     out.push_str(&format!(
         r#"<section class="agent-section"><h2>{}</h2><div class="tables">"#,
         html_escape(name)
     ));
-    out.push_str(&named_table("By model", "model", &usage.by_model));
-    out.push_str(&named_table("By project", "project", &usage.by_project));
+    out.push_str(&named_table(lang.text("By model", "Modele göre"), lang.text("model", "model"), &usage.by_model, lang));
+    out.push_str(&named_table(lang.text("By project", "Projeye göre"), lang.text("project", "proje"), &usage.by_project, lang));
     out.push_str(r#"</div></section>"#);
     out
 }
 
-fn chart_card(title: &str, buckets: &[TimeBucket]) -> String {
+fn chart_card(title: &str, buckets: &[TimeBucket], lang: Language) -> String {
     if buckets.is_empty() {
         return format!(
-            r#"<div class="chart-card"><h3>{}</h3><div class="empty">no data</div></div>"#,
-            html_escape(title)
+            r#"<div class="chart-card"><h3>{}</h3><div class="empty">{}</div></div>"#,
+            html_escape(title),
+            lang.text("no data", "veri yok"),
         );
     }
 
@@ -246,7 +294,7 @@ fn chart_card(title: &str, buckets: &[TimeBucket]) -> String {
     )
 }
 
-fn named_table(title: &str, name_heading: &str, items: &[NamedBucket]) -> String {
+fn named_table(title: &str, name_heading: &str, items: &[NamedBucket], lang: Language) -> String {
     let mut rows = String::new();
     let total: u64 = items.iter().map(|i| i.tokens).sum::<u64>().max(1);
     for it in items.iter().take(12) {
@@ -261,16 +309,22 @@ fn named_table(title: &str, name_heading: &str, items: &[NamedBucket]) -> String
         ));
     }
     if rows.is_empty() {
-        rows = r#"<tr><td colspan="4" class="empty">no data</td></tr>"#.into();
+        rows = format!(
+            r#"<tr><td colspan="4" class="empty">{}</td></tr>"#,
+            lang.text("no data", "veri yok")
+        );
     }
     format!(
-        r#"<div class="table-card"><h3>{}</h3><table><thead><tr><th>{}</th><th>sessions</th><th>tokens</th><th>share</th></tr></thead><tbody>{rows}</tbody></table></div>"#,
+        r#"<div class="table-card"><h3>{}</h3><table><thead><tr><th>{}</th><th>{}</th><th>{}</th><th>{}</th></tr></thead><tbody>{rows}</tbody></table></div>"#,
         html_escape(title),
-        html_escape(name_heading)
+        html_escape(name_heading),
+        lang.text("sessions", "oturum"),
+        lang.text("tokens", "token"),
+        lang.text("share", "pay"),
     )
 }
 
-fn recent_sessions_table(items: &[SessionRecord]) -> String {
+fn recent_sessions_table(items: &[SessionRecord], lang: Language) -> String {
     let mut rows = String::new();
     for s in items {
         rows.push_str(&format!(
@@ -284,10 +338,19 @@ fn recent_sessions_table(items: &[SessionRecord]) -> String {
         ));
     }
     if rows.is_empty() {
-        rows = r#"<tr><td colspan="6" class="empty">no recent sessions</td></tr>"#.into();
+        rows = format!(
+            r#"<tr><td colspan="6" class="empty">{}</td></tr>"#,
+            lang.text("no recent sessions", "yakın oturum yok")
+        );
     }
     format!(
-        r#"<div class="table-card wide"><table><thead><tr><th>started</th><th>project</th><th>model</th><th>duration</th><th>tokens</th><th>session id</th></tr></thead><tbody>{rows}</tbody></table></div>"#,
+        r#"<div class="table-card wide"><table><thead><tr><th>{}</th><th>{}</th><th>{}</th><th>{}</th><th>{}</th><th>{}</th></tr></thead><tbody>{rows}</tbody></table></div>"#,
+        lang.text("started", "başlangıç"),
+        lang.text("project", "proje"),
+        lang.text("model", "model"),
+        lang.text("duration", "süre"),
+        lang.text("tokens", "token"),
+        lang.text("session id", "oturum id"),
     )
 }
 

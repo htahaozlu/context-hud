@@ -14,7 +14,6 @@
 
 import AppKit
 import Foundation
-import WebKit
 
 // MARK: - Themes
 
@@ -143,15 +142,70 @@ final class SeparatorStore {
     }
 }
 
+enum AppLanguage: String, CaseIterable {
+    case auto
+    case en
+    case tr
+
+    var label: String {
+        switch self {
+        case .auto: return "Auto"
+        case .en: return "EN"
+        case .tr: return "TR"
+        }
+    }
+}
+
+final class LanguageStore {
+    static let key = "language"
+
+    static var selected: AppLanguage {
+        get { AppLanguage(rawValue: UserDefaults.standard.string(forKey: key) ?? "auto") ?? .auto }
+    }
+
+    static var resolved: AppLanguage {
+        switch selected {
+        case .auto:
+            let preferred = Locale.preferredLanguages.first?.lowercased() ?? "en"
+            return preferred.hasPrefix("tr") ? .tr : .en
+        case .en, .tr:
+            return selected
+        }
+    }
+
+    static func set(_ language: AppLanguage) {
+        UserDefaults.standard.set(language.rawValue, forKey: key)
+    }
+}
+
+enum L10n {
+    static var lang: AppLanguage { LanguageStore.resolved }
+
+    static func text(_ en: String, _ tr: String) -> String {
+        lang == .tr ? tr : en
+    }
+
+    static func displayElementLabel(_ element: DisplayElement) -> String {
+        switch element {
+        case .agent: return text("Agent name", "Ajan adı")
+        case .project: return text("Project (cwd)", "Proje (cwd)")
+        case .pct: return text("Context %", "Bağlam %")
+        }
+    }
+
+    static func relative(_ elapsed: TimeInterval) -> String {
+        if elapsed < 60 { return lang == .tr ? "\(Int(elapsed)) sn önce" : "\(Int(elapsed))s ago" }
+        if elapsed < 3600 { return lang == .tr ? "\(Int(elapsed/60)) dk önce" : "\(Int(elapsed/60))m ago" }
+        if elapsed < 86400 { return lang == .tr ? "\(Int(elapsed/3600)) sa önce" : "\(Int(elapsed/3600))h ago" }
+        return lang == .tr ? "\(Int(elapsed/86400)) g önce" : "\(Int(elapsed/86400))d ago"
+    }
+}
+
 /// What to render in the menubar title and in what order.
 enum DisplayElement: String, CaseIterable {
     case agent, project, pct
     var label: String {
-        switch self {
-        case .agent: return "Agent name"
-        case .project: return "Project (cwd)"
-        case .pct: return "Context %"
-        }
+        L10n.displayElementLabel(self)
     }
 }
 
@@ -319,7 +373,7 @@ final class Hud {
     static func resetsIn(_ date: Date?) -> String {
         guard let date else { return "—" }
         let remaining = date.timeIntervalSinceNow
-        if remaining <= 0 { return "ready" }
+        if remaining <= 0 { return L10n.text("ready", "hazır") }
         if remaining < 60 { return "<1m" }
         if remaining < 3600 { return "\(Int(remaining/60))m" }
         let h = Int(remaining / 3600)
@@ -346,10 +400,7 @@ final class Hud {
 
     static func relative(_ date: Date) -> String {
         let elapsed = Date().timeIntervalSince(date)
-        if elapsed < 60 { return "\(Int(elapsed))s ago" }
-        if elapsed < 3600 { return "\(Int(elapsed/60))m ago" }
-        if elapsed < 86400 { return "\(Int(elapsed/3600))h ago" }
-        return "\(Int(elapsed/86400))d ago"
+        return L10n.relative(elapsed)
     }
 
     /// Traffic-light color for a context % value.
@@ -365,20 +416,474 @@ final class Hud {
 
 // MARK: - Detail window
 
-/// In-process detail window — WKWebView loading ~/.zed-context/detail.html.
-/// We render the report inside our own app so the user never bounces to a
-/// browser; the window is created lazily and reused across opens.
+/// Horizontal progress bar drawn natively. Fills `value` (0...1) with the
+/// supplied tint over a subtle track. Used for window-elapsed limits and
+/// active-session context-window meters.
+final class ProgressBarView: NSView {
+    var value: Double = 0 { didSet { needsDisplay = true } }
+    var tint: NSColor = .controlAccentColor { didSet { needsDisplay = true } }
+    var trackColor: NSColor = NSColor.tertiaryLabelColor.withAlphaComponent(0.18)
+    var corner: CGFloat = 3
+
+    override var isFlipped: Bool { true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let track = NSBezierPath(roundedRect: bounds, xRadius: corner, yRadius: corner)
+        trackColor.setFill()
+        track.fill()
+        let clamped = max(0, min(1, value))
+        guard clamped > 0 else { return }
+        let fillRect = NSRect(x: 0, y: 0, width: bounds.width * clamped, height: bounds.height)
+        let fill = NSBezierPath(roundedRect: fillRect, xRadius: corner, yRadius: corner)
+        tint.setFill()
+        fill.fill()
+    }
+}
+
+/// Compact 30-day sparkline drawn with rounded mini bars. Highlights the most
+/// recent day to give an at-a-glance sense of recent burn vs trend.
+final class SparklineView: NSView {
+    var values: [Double] = [] { didSet { needsDisplay = true } }
+    var tint: NSColor = .controlAccentColor
+
+    override var isFlipped: Bool { true }
+    override var intrinsicContentSize: NSSize { NSSize(width: NSView.noIntrinsicMetric, height: 56) }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard !values.isEmpty, let maxV = values.max(), maxV > 0 else { return }
+        let n = values.count
+        let gap: CGFloat = 2
+        let totalGap = gap * CGFloat(n - 1)
+        let barW = max(2, (bounds.width - totalGap) / CGFloat(n))
+        for (i, v) in values.enumerated() {
+            let h = max(2, CGFloat(v / maxV) * (bounds.height - 4))
+            let x = CGFloat(i) * (barW + gap)
+            let rect = NSRect(x: x, y: bounds.height - h, width: barW, height: h)
+            let color = (i == n - 1) ? tint : tint.withAlphaComponent(0.45)
+            color.setFill()
+            NSBezierPath(roundedRect: rect, xRadius: 1.5, yRadius: 1.5).fill()
+        }
+    }
+}
+
+/// Custom NSView used inside an NSMenuItem to render a per-window limit row
+/// with a horizontal progress bar showing window-elapsed fraction.
+final class LimitRowView: NSView {
+    private let labelField = NSTextField(labelWithString: "")
+    private let tokenField = NSTextField(labelWithString: "")
+    private let resetField = NSTextField(labelWithString: "")
+    private let bar = ProgressBarView()
+
+    override var intrinsicContentSize: NSSize { NSSize(width: 320, height: 22) }
+
+    init(label: String, tokens: String, reset: String) {
+        super.init(frame: NSRect(x: 0, y: 0, width: 320, height: 22))
+
+        labelField.stringValue = label
+        labelField.font = NSFont.menuFont(ofSize: NSFont.smallSystemFontSize)
+        labelField.textColor = .secondaryLabelColor
+        labelField.translatesAutoresizingMaskIntoConstraints = false
+
+        tokenField.stringValue = tokens
+        tokenField.font = NSFont.monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .medium)
+        tokenField.textColor = .labelColor
+        tokenField.translatesAutoresizingMaskIntoConstraints = false
+
+        resetField.stringValue = "↻ \(reset)"
+        resetField.font = NSFont.monospacedSystemFont(ofSize: NSFont.smallSystemFontSize - 1, weight: .regular)
+        resetField.textColor = .tertiaryLabelColor
+        resetField.alignment = .right
+        resetField.translatesAutoresizingMaskIntoConstraints = false
+
+        addSubview(labelField); addSubview(tokenField); addSubview(resetField)
+        NSLayoutConstraint.activate([
+            labelField.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 28),
+            labelField.centerYAnchor.constraint(equalTo: centerYAnchor),
+            labelField.widthAnchor.constraint(equalToConstant: 56),
+
+            tokenField.leadingAnchor.constraint(equalTo: labelField.trailingAnchor, constant: 4),
+            tokenField.firstBaselineAnchor.constraint(equalTo: labelField.firstBaselineAnchor),
+
+            resetField.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
+            resetField.firstBaselineAnchor.constraint(equalTo: labelField.firstBaselineAnchor),
+        ])
+        _ = bar
+    }
+    required init?(coder: NSCoder) { fatalError() }
+}
+
+/// Stat tile — a small native card with a caption + big value. Used in the
+/// Usage tab to surface tokens / sessions / context % at a glance.
+final class StatTileView: NSView {
+    init(caption: String, value: String, valueColor: NSColor = .labelColor, mono: Bool = true) {
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.cornerRadius = 8
+        layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+        layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.5).cgColor
+        layer?.borderWidth = 1
+
+        let cap = NSTextField(labelWithString: caption.uppercased())
+        cap.font = NSFont.systemFont(ofSize: 9, weight: .semibold)
+        cap.textColor = .tertiaryLabelColor
+        cap.translatesAutoresizingMaskIntoConstraints = false
+
+        let val = NSTextField(labelWithString: value)
+        val.font = mono
+            ? NSFont.monospacedSystemFont(ofSize: 20, weight: .medium)
+            : NSFont.systemFont(ofSize: 20, weight: .semibold)
+        val.textColor = valueColor
+        val.translatesAutoresizingMaskIntoConstraints = false
+
+        addSubview(cap)
+        addSubview(val)
+        translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            cap.topAnchor.constraint(equalTo: topAnchor, constant: 10),
+            cap.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            cap.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -12),
+            val.topAnchor.constraint(equalTo: cap.bottomAnchor, constant: 4),
+            val.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            val.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -12),
+            val.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -10),
+            heightAnchor.constraint(greaterThanOrEqualToConstant: 64),
+        ])
+    }
+    required init?(coder: NSCoder) { fatalError() }
+}
+
+/// Stat tile with caption + primary value + faded sub-value. Lets each tile
+/// surface a number (eg "3.4M") alongside its context (eg "resets in 2h").
+final class DualStatTileView: NSView {
+    init(caption: String, value: String, valueColor: NSColor = .labelColor,
+         sub: String, mono: Bool = true) {
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.cornerRadius = 8
+        layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+        layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.5).cgColor
+        layer?.borderWidth = 1
+
+        let cap = NSTextField(labelWithString: caption.uppercased())
+        cap.font = NSFont.systemFont(ofSize: 9, weight: .semibold)
+        cap.textColor = .tertiaryLabelColor
+        cap.translatesAutoresizingMaskIntoConstraints = false
+
+        let val = NSTextField(labelWithString: value)
+        val.font = mono
+            ? NSFont.monospacedSystemFont(ofSize: 22, weight: .medium)
+            : NSFont.systemFont(ofSize: 22, weight: .semibold)
+        val.textColor = valueColor
+        val.translatesAutoresizingMaskIntoConstraints = false
+
+        let subLbl = NSTextField(labelWithString: sub)
+        subLbl.font = NSFont.systemFont(ofSize: 10)
+        subLbl.textColor = .secondaryLabelColor
+        subLbl.lineBreakMode = .byTruncatingTail
+        subLbl.translatesAutoresizingMaskIntoConstraints = false
+
+        addSubview(cap); addSubview(val); addSubview(subLbl)
+        translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            cap.topAnchor.constraint(equalTo: topAnchor, constant: 10),
+            cap.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            cap.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -12),
+            val.topAnchor.constraint(equalTo: cap.bottomAnchor, constant: 4),
+            val.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            val.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -12),
+            subLbl.topAnchor.constraint(equalTo: val.bottomAnchor, constant: 4),
+            subLbl.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            subLbl.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -12),
+            subLbl.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -10),
+            heightAnchor.constraint(greaterThanOrEqualToConstant: 84),
+        ])
+    }
+    required init?(coder: NSCoder) { fatalError() }
+}
+
+/// Native Usage panel — rebuilt per refresh from hud.json. One card per agent
+/// with stat tiles, window progress bars, active-session strip, and a 30-day
+/// sparkline. Replaces the previous WKWebView approach so the panel feels at
+/// home on macOS (no scrollbars, no font drift, no white flash).
 final class UsageViewController: NSViewController {
-    private var webView: WKWebView!
+    private let scrollView = NSScrollView()
+    private let container = NSStackView()
 
     override func loadView() {
-        webView = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
-        view = webView
+        view = NSView()
+        scrollView.hasVerticalScroller = true
+        scrollView.drawsBackground = false
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(scrollView)
+
+        let doc = NSView()
+        doc.translatesAutoresizingMaskIntoConstraints = false
+        container.orientation = .vertical
+        container.alignment = .leading
+        container.spacing = 18
+        container.translatesAutoresizingMaskIntoConstraints = false
+        doc.addSubview(container)
+        scrollView.documentView = doc
+
+        NSLayoutConstraint.activate([
+            scrollView.topAnchor.constraint(equalTo: view.topAnchor),
+            scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            doc.widthAnchor.constraint(equalTo: scrollView.widthAnchor),
+            container.topAnchor.constraint(equalTo: doc.topAnchor, constant: 24),
+            container.leadingAnchor.constraint(equalTo: doc.leadingAnchor, constant: 24),
+            container.trailingAnchor.constraint(equalTo: doc.trailingAnchor, constant: -24),
+            container.bottomAnchor.constraint(equalTo: doc.bottomAnchor, constant: -24),
+        ])
     }
 
     func reload() {
-        let url = URL(fileURLWithPath: "\(NSHomeDirectory())/.zed-context/detail.html")
-        webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
+        container.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        let hud = Hud()
+        let (active, all, others) = hud.load()
+        if all.isEmpty {
+            let empty = NSTextField(labelWithString: L10n.text(
+                "No agent data yet. Start a Claude or Codex session.",
+                "Henüz ajan verisi yok. Bir Claude veya Codex oturumu başlatın."
+            ))
+            empty.font = NSFont.systemFont(ofSize: 13)
+            empty.textColor = .secondaryLabelColor
+            container.addArrangedSubview(empty)
+            return
+        }
+        for a in all {
+            let card = buildAgentCard(agent: a, isActive: a.name == active?.name)
+            container.addArrangedSubview(card)
+            card.widthAnchor.constraint(equalTo: container.widthAnchor).isActive = true
+        }
+        if !others.isEmpty {
+            let card = buildOthersCard(tools: others)
+            container.addArrangedSubview(card)
+            card.widthAnchor.constraint(equalTo: container.widthAnchor).isActive = true
+        }
+    }
+
+    /// Agent card: header + 4 stat tiles (context / active session / 5h / 7d) +
+    /// 30-day sparkline. All data visible by default — no disclosures. Each
+    /// tile pairs a primary value with a faded sub-value so the user sees both
+    /// "what" and "when/how much" without scanning multiple sections.
+    private func buildAgentCard(agent a: Agent, isActive: Bool) -> NSView {
+        let card = NSView()
+        card.wantsLayer = true
+        card.layer?.cornerRadius = 12
+        card.layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.55).cgColor
+        card.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.5).cgColor
+        card.layer?.borderWidth = 1
+        card.translatesAutoresizingMaskIntoConstraints = false
+
+        // Header: ● Name  · model · project · last turn
+        let dot = NSTextField(labelWithString: "●")
+        dot.font = NSFont.systemFont(ofSize: 10)
+        dot.textColor = isActive ? .systemGreen : .tertiaryLabelColor
+
+        let nameLbl = NSTextField(labelWithString: a.name)
+        nameLbl.font = NSFont.systemFont(ofSize: 16, weight: .semibold)
+
+        var metaParts: [String] = []
+        if let m = a.model { metaParts.append(m) }
+        metaParts.append(a.project)
+        if let t = a.lastTurn { metaParts.append(Hud.relative(t)) }
+        let metaLbl = NSTextField(labelWithString: metaParts.joined(separator: "  ·  "))
+        metaLbl.font = NSFont.systemFont(ofSize: 11)
+        metaLbl.textColor = .secondaryLabelColor
+
+        let titleRow = NSStackView(views: [dot, nameLbl])
+        titleRow.orientation = .horizontal; titleRow.spacing = 6; titleRow.alignment = .firstBaseline
+
+        let header = NSStackView(views: [titleRow, metaLbl])
+        header.orientation = .vertical; header.alignment = .leading; header.spacing = 2
+        header.translatesAutoresizingMaskIntoConstraints = false
+
+        // Stat tiles
+        let ctxPctStr = a.ctxPct.map { String(format: "%.0f%%", $0) } ?? "—"
+        let ctxSub = a.ctxWindow.map { "\(Hud.formatTokens(a.activeSession)) of \(Hud.formatTokens($0))" } ?? "—"
+        let sessDur = Hud.formatDuration(a.sessionStarted, a.lastTurn)
+
+        let tiles = NSStackView(views: [
+            DualStatTileView(caption: "context",
+                             value: ctxPctStr, valueColor: Hud.ctxColor(a.ctxPct),
+                             sub: ctxSub, mono: false),
+            DualStatTileView(caption: L10n.text("session", "oturum"),
+                             value: Hud.formatTokens(a.activeSession),
+                             sub: L10n.text("\(sessDur) running", "\(sessDur) süredir aktif")),
+            DualStatTileView(caption: L10n.text("5h window", "5s pencere"),
+                             value: Hud.formatTokens(a.session5h),
+                             sub: L10n.text("resets in \(Hud.resetsIn(a.session5hResetsAt))", "\(Hud.resetsIn(a.session5hResetsAt)) sonra sıfırlanır")),
+            DualStatTileView(caption: L10n.text("7d window", "7g pencere"),
+                             value: Hud.formatTokens(a.week7d),
+                             sub: L10n.text("resets in \(Hud.resetsIn(a.week7dResetsAt))", "\(Hud.resetsIn(a.week7dResetsAt)) sonra sıfırlanır")),
+        ])
+        tiles.orientation = .horizontal
+        tiles.distribution = .fillEqually
+        tiles.spacing = 10
+        tiles.translatesAutoresizingMaskIntoConstraints = false
+
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 14
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.addArrangedSubview(header)
+        stack.addArrangedSubview(tiles)
+
+        if let spark = buildSparkline(forAgent: a.name) {
+            stack.addArrangedSubview(spark)
+            spark.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        }
+
+        card.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: card.topAnchor, constant: 18),
+            stack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 18),
+            stack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -18),
+            stack.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -18),
+            header.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            tiles.widthAnchor.constraint(equalTo: stack.widthAnchor),
+        ])
+        return card
+    }
+
+    private func buildContextRow(pct: Double, window: UInt64?, used: UInt64) -> NSView {
+        let row = NSView()
+        row.translatesAutoresizingMaskIntoConstraints = false
+
+        let lbl = NSTextField(labelWithString: L10n.text("context window", "bağlam penceresi"))
+        lbl.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        lbl.textColor = .secondaryLabelColor
+        lbl.translatesAutoresizingMaskIntoConstraints = false
+
+        let detail: String = {
+            let pctS = String(format: "%.0f%%", pct)
+            if let w = window {
+                return "\(pctS)   \(Hud.formatTokens(used)) / \(Hud.formatTokens(w))"
+            }
+            return pctS
+        }()
+        let v = NSTextField(labelWithString: detail)
+        v.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .medium)
+        v.textColor = Hud.ctxColor(pct)
+        v.alignment = .right
+        v.translatesAutoresizingMaskIntoConstraints = false
+
+        let bar = ProgressBarView()
+        bar.translatesAutoresizingMaskIntoConstraints = false
+        bar.value = max(0, min(1, pct / 100.0))
+        bar.tint = Hud.ctxColor(pct)
+
+        row.addSubview(lbl); row.addSubview(v); row.addSubview(bar)
+        NSLayoutConstraint.activate([
+            lbl.leadingAnchor.constraint(equalTo: row.leadingAnchor),
+            lbl.topAnchor.constraint(equalTo: row.topAnchor),
+            v.trailingAnchor.constraint(equalTo: row.trailingAnchor),
+            v.firstBaselineAnchor.constraint(equalTo: lbl.firstBaselineAnchor),
+            bar.leadingAnchor.constraint(equalTo: row.leadingAnchor),
+            bar.trailingAnchor.constraint(equalTo: row.trailingAnchor),
+            bar.topAnchor.constraint(equalTo: lbl.bottomAnchor, constant: 6),
+            bar.heightAnchor.constraint(equalToConstant: 6),
+            bar.bottomAnchor.constraint(equalTo: row.bottomAnchor),
+        ])
+        return row
+    }
+
+    private func buildSparkline(forAgent name: String) -> NSView? {
+        let path = "\(NSHomeDirectory())/.zed-context/hud.json"
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let agent = root[name.lowercased()] as? [String: Any],
+              let byDay = agent["by_day"] as? [[String: Any]],
+              !byDay.isEmpty else {
+            return nil
+        }
+        let last = Array(byDay.prefix(30)).reversed()
+        let values = last.map { Double(($0["tokens"] as? UInt64) ?? UInt64($0["tokens"] as? Int ?? 0)) }
+
+        let row = NSView()
+        row.translatesAutoresizingMaskIntoConstraints = false
+        let cap = NSTextField(labelWithString: L10n.text("30-DAY TOKENS", "30 GÜN TOKEN"))
+        cap.font = NSFont.systemFont(ofSize: 9, weight: .semibold)
+        cap.textColor = .tertiaryLabelColor
+        cap.translatesAutoresizingMaskIntoConstraints = false
+
+        let total = values.reduce(0, +)
+        let totalLbl = NSTextField(labelWithString: Hud.formatTokens(UInt64(total)))
+        totalLbl.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+        totalLbl.textColor = .secondaryLabelColor
+        totalLbl.alignment = .right
+        totalLbl.translatesAutoresizingMaskIntoConstraints = false
+
+        let spark = SparklineView()
+        spark.values = Array(values)
+        spark.tint = .controlAccentColor
+        spark.translatesAutoresizingMaskIntoConstraints = false
+
+        row.addSubview(cap); row.addSubview(totalLbl); row.addSubview(spark)
+        NSLayoutConstraint.activate([
+            cap.leadingAnchor.constraint(equalTo: row.leadingAnchor),
+            cap.topAnchor.constraint(equalTo: row.topAnchor),
+            totalLbl.trailingAnchor.constraint(equalTo: row.trailingAnchor),
+            totalLbl.firstBaselineAnchor.constraint(equalTo: cap.firstBaselineAnchor),
+            spark.leadingAnchor.constraint(equalTo: row.leadingAnchor),
+            spark.trailingAnchor.constraint(equalTo: row.trailingAnchor),
+            spark.topAnchor.constraint(equalTo: cap.bottomAnchor, constant: 6),
+            spark.heightAnchor.constraint(equalToConstant: 56),
+            spark.bottomAnchor.constraint(equalTo: row.bottomAnchor),
+        ])
+        return row
+    }
+
+    private func buildOthersCard(tools: [ToolSummary]) -> NSView {
+        let card = NSView()
+        card.wantsLayer = true
+        card.layer?.cornerRadius = 12
+        card.layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.6).cgColor
+        card.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.6).cgColor
+        card.layer?.borderWidth = 1
+        card.translatesAutoresizingMaskIntoConstraints = false
+
+        let title = NSTextField(labelWithString: L10n.text("Other AI tools", "Diğer AI araçları"))
+        title.font = NSFont.systemFont(ofSize: 14, weight: .semibold)
+        title.translatesAutoresizingMaskIntoConstraints = false
+
+        let rows = NSStackView()
+        rows.orientation = .vertical
+        rows.alignment = .leading
+        rows.spacing = 6
+        rows.translatesAutoresizingMaskIntoConstraints = false
+        for t in tools {
+            let name = NSTextField(labelWithString: t.name)
+            name.font = NSFont.systemFont(ofSize: 12, weight: .medium)
+            let info = NSTextField(labelWithString: "\(Hud.formatTokens(t.tokens7d))  ·  \(t.sessions7d)×/\(L10n.text("wk", "hf"))  ·  \(t.lastModel ?? "—")")
+            info.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+            info.textColor = .secondaryLabelColor
+            let r = NSStackView(views: [name, NSView(), info])
+            r.orientation = .horizontal
+            r.spacing = 8
+            r.translatesAutoresizingMaskIntoConstraints = false
+            rows.addArrangedSubview(r)
+            r.widthAnchor.constraint(equalTo: rows.widthAnchor).isActive = true
+        }
+
+        let stack = NSStackView(views: [title, rows])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 10
+        stack.translatesAutoresizingMaskIntoConstraints = false
+
+        card.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: card.topAnchor, constant: 18),
+            stack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 18),
+            stack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -18),
+            stack.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -18),
+            rows.widthAnchor.constraint(equalTo: stack.widthAnchor),
+        ])
+        return card
     }
 }
 
@@ -564,6 +1069,7 @@ final class SettingsViewController: NSViewController {
     var onThemeChange: ((String) -> Void)?
     private var cardViews: [(ThemeCardView, Theme)] = []
     private var sepControl: NSSegmentedControl?
+    private var langControl: NSSegmentedControl?
     private let displayTable = DisplayTableController()
 
     override func loadView() { view = NSView() }
@@ -605,15 +1111,40 @@ final class SettingsViewController: NSViewController {
         themeGrid.orientation = .vertical; themeGrid.spacing = 10; themeGrid.alignment = .leading
         themeGrid.translatesAutoresizingMaskIntoConstraints = false
         let titleLabel = NSTextField(labelWithString: "Appearance")
+        titleLabel.stringValue = L10n.text("Appearance", "Görünüm")
         titleLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
-        let descLabel = NSTextField(labelWithString: "Choose a color theme for the menubar and status bar.")
+        let descLabel = NSTextField(labelWithString: L10n.text(
+            "Choose a color theme for the menubar and status bar.",
+            "Menubar ve durum çubuğu için bir renk teması seçin."
+        ))
         descLabel.font = NSFont.systemFont(ofSize: 11)
         descLabel.textColor = .secondaryLabelColor
 
+        let langTitle = NSTextField(labelWithString: L10n.text("Language", "Dil"))
+        langTitle.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        let langDesc = NSTextField(labelWithString: L10n.text(
+            "Use system language automatically or force English/Turkish.",
+            "Sistem dilini otomatik kullanın veya İngilizce/Türkçe zorlayın."
+        ))
+        langDesc.font = NSFont.systemFont(ofSize: 11)
+        langDesc.textColor = .secondaryLabelColor
+        let langSeg = NSSegmentedControl(
+            labels: AppLanguage.allCases.map(\.label),
+            trackingMode: .selectOne,
+            target: self,
+            action: #selector(languageChanged(_:))
+        )
+        langSeg.selectedSegment = AppLanguage.allCases.firstIndex(of: LanguageStore.selected) ?? 0
+        langSeg.translatesAutoresizingMaskIntoConstraints = false
+        langControl = langSeg
+
         // Separator section
-        let sepTitle = NSTextField(labelWithString: "Separator")
+        let sepTitle = NSTextField(labelWithString: L10n.text("Separator", "Ayraç"))
         sepTitle.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
-        let sepDesc = NSTextField(labelWithString: "Character shown between agent name, project, and context %.")
+        let sepDesc = NSTextField(labelWithString: L10n.text(
+            "Character shown between agent name, project, and context %.",
+            "Ajan adı, proje ve bağlam % arasında gösterilen karakter."
+        ))
         sepDesc.font = NSFont.systemFont(ofSize: 11)
         sepDesc.textColor = .secondaryLabelColor
 
@@ -628,15 +1159,19 @@ final class SettingsViewController: NSViewController {
         sepControl = seg
 
         // Display elements section — reorder + toggle each menubar title element.
-        let dispTitle = NSTextField(labelWithString: "Menubar Title")
+        let dispTitle = NSTextField(labelWithString: L10n.text("Menubar Title", "Menubar Başlığı"))
         dispTitle.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
-        let dispDesc = NSTextField(labelWithString: "Toggle and drag to reorder which parts appear in the menubar title.")
+        let dispDesc = NSTextField(labelWithString: L10n.text(
+            "Toggle and drag to reorder which parts appear in the menubar title.",
+            "Menubar başlığında görünecek parçaları açın/kapatın ve sürükleyerek sıralayın."
+        ))
         dispDesc.font = NSFont.systemFont(ofSize: 11)
         dispDesc.textColor = .secondaryLabelColor
         displayTable.onChange = { [weak self] in self?.onThemeChange?(ThemeStore.current.id) }
 
         let mainStack = NSStackView(views: [
             titleLabel, descLabel, themeGrid,
+            langTitle, langDesc, langSeg,
             sepTitle, sepDesc, seg,
             dispTitle, dispDesc, displayTable.scrollView,
         ])
@@ -666,6 +1201,12 @@ final class SettingsViewController: NSViewController {
         SeparatorStore.set(value)
         onThemeChange?(ThemeStore.current.id)
     }
+
+    @objc private func languageChanged(_ sender: NSSegmentedControl) {
+        let language = AppLanguage.allCases[sender.selectedSegment]
+        LanguageStore.set(language)
+        onThemeChange?(ThemeStore.current.id)
+    }
 }
 
 final class DetailWindowController: NSWindowController, NSWindowDelegate {
@@ -676,9 +1217,9 @@ final class DetailWindowController: NSWindowController, NSWindowDelegate {
     init(onThemeChange: @escaping (String) -> Void) {
         self.settingsVC = SettingsViewController()
         let usageItem = NSTabViewItem(viewController: usageVC)
-        usageItem.label = "Usage"
+        usageItem.label = L10n.text("Usage", "Kullanım")
         let settingsItem = NSTabViewItem(viewController: settingsVC)
-        settingsItem.label = "Settings"
+        settingsItem.label = L10n.text("Settings", "Ayarlar")
         tabVC.tabStyle = .segmentedControlOnTop
         tabVC.addTabViewItem(usageItem)
         tabVC.addTabViewItem(settingsItem)
@@ -687,7 +1228,7 @@ final class DetailWindowController: NSWindowController, NSWindowDelegate {
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered, defer: false
         )
-        window.title = "zed-context · usage"
+        window.title = L10n.text("zed-context · usage", "zed-context · kullanım")
         window.titlebarAppearsTransparent = true
         window.isReleasedWhenClosed = false
         window.center()
@@ -699,7 +1240,14 @@ final class DetailWindowController: NSWindowController, NSWindowDelegate {
     required init?(coder: NSCoder) { fatalError() }
 
     func show() { load(); window?.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true) }
-    func load() { usageVC.reload() }
+    func load() {
+        if tabVC.tabViewItems.count >= 2 {
+            tabVC.tabViewItems[0].label = L10n.text("Usage", "Kullanım")
+            tabVC.tabViewItems[1].label = L10n.text("Settings", "Ayarlar")
+        }
+        window?.title = L10n.text("zed-context · usage", "zed-context · kullanım")
+        usageVC.reload()
+    }
     func windowShouldClose(_ sender: NSWindow) -> Bool { sender.orderOut(nil); return false }
 }
 
@@ -740,7 +1288,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let menu = NSMenu()
         if all.isEmpty {
-            let empty = NSMenuItem(title: "No agent data yet", action: nil, keyEquivalent: "")
+            let empty = NSMenuItem(title: L10n.text("No agent data yet", "Henüz ajan verisi yok"), action: nil, keyEquivalent: "")
             empty.isEnabled = false
             menu.addItem(empty)
         } else {
@@ -761,7 +1309,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let h = NSMenuItem()
             h.isEnabled = false
             h.attributedTitle = NSAttributedString(
-                string: "LIMITS",
+                string: L10n.text("LIMITS", "LİMİTLER"),
                 attributes: [
                     .font: NSFont.menuFont(ofSize: NSFont.smallSystemFontSize - 1),
                     .foregroundColor: NSColor.tertiaryLabelColor,
@@ -776,10 +1324,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Other AI tools detected on this system
         if !others.isEmpty {
             menu.addItem(NSMenuItem.separator())
-            let header = NSMenuItem(title: "Other Tools", action: nil, keyEquivalent: "")
+            let header = NSMenuItem(title: L10n.text("Other Tools", "Diğer Araçlar"), action: nil, keyEquivalent: "")
             header.isEnabled = false
             header.attributedTitle = NSAttributedString(
-                string: "OTHER TOOLS",
+                string: L10n.text("OTHER TOOLS", "DİĞER ARAÇLAR"),
                 attributes: [
                     .font: NSFont.menuFont(ofSize: NSFont.smallSystemFontSize - 1),
                     .foregroundColor: NSColor.tertiaryLabelColor,
@@ -795,8 +1343,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         // Theme submenu — each entry previews its own colors using a sample
         // title so the user can compare looks before committing.
-        let themeRoot = NSMenuItem(title: "Theme", action: nil, keyEquivalent: "")
-        let themeMenu = NSMenu(title: "Theme")
+        let themeRoot = NSMenuItem(title: L10n.text("Theme", "Tema"), action: nil, keyEquivalent: "")
+        let themeMenu = NSMenu(title: L10n.text("Theme", "Tema"))
         let currentId = ThemeStore.current.id
         let sampleProject = active?.project ?? "project"
         let samplePct = active?.ctxPct ?? 42.0
@@ -823,18 +1371,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(themeRoot)
 
         menu.addItem(NSMenuItem(
-            title: "Open detail report…",
+            title: L10n.text("Open detail report…", "Detay raporunu aç…"),
             action: #selector(openDetail),
             keyEquivalent: "d"
         ))
         menu.addItem(NSMenuItem(
-            title: "Refresh now",
+            title: L10n.text("Refresh now", "Şimdi yenile"),
             action: #selector(refreshNow),
             keyEquivalent: "r"
         ))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(
-            title: "Quit zed-context-bar",
+            title: L10n.text("Quit zed-context-bar", "zed-context-bar'dan çık"),
             action: #selector(quit),
             keyEquivalent: "q"
         ))
@@ -846,7 +1394,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     ///     <Agent> <sep> <project> <sep> <ctx%>
     private func composeTitle(active: Agent?, theme: Theme = ThemeStore.current) -> NSAttributedString {
         guard let a = active else {
-            return NSAttributedString(string: " no agent",
+            return NSAttributedString(string: L10n.text(" no agent", " ajan yok"),
                                       attributes: [.foregroundColor: NSColor.secondaryLabelColor])
         }
         return styleTitle(
@@ -969,7 +1517,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let lastItem = NSMenuItem()
         lastItem.isEnabled = false
         lastItem.attributedTitle = NSAttributedString(
-            string: "             last turn   \(last)",
+            string: "             \(L10n.text("last turn", "son tur"))   \(last)",
             attributes: [
                 .font: sessionFont,
                 .foregroundColor: NSColor.tertiaryLabelColor,
@@ -1037,43 +1585,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         )
         menu.addItem(nameItem)
 
-        // 5h and 7d rows
         for (label, tokens, resetsAt) in [
-            ("5h window", Hud.formatTokens(a.session5h), a.session5hResetsAt),
-            ("7d window", Hud.formatTokens(a.week7d),    a.week7dResetsAt),
+            ("5h", a.session5h, a.session5hResetsAt),
+            ("7d", a.week7d, a.week7dResetsAt),
         ] {
-            let resetStr = Hud.resetsIn(resetsAt)
-            let row = NSMenuItem()
-            row.isEnabled = false
-            row.attributedTitle = buildLimitRow(label: label, tokens: tokens, reset: resetStr)
-            menu.addItem(row)
+            let view = LimitRowView(
+                label: label,
+                tokens: Hud.formatTokens(tokens),
+                reset: Hud.resetsIn(resetsAt)
+            )
+            view.frame = NSRect(x: 0, y: 0, width: 320, height: 22)
+            let item = NSMenuItem()
+            item.isEnabled = false
+            item.view = view
+            menu.addItem(item)
         }
-    }
-
-    private func buildLimitRow(label: String, tokens: String, reset: String) -> NSAttributedString {
-        let font  = NSFont.menuFont(ofSize: NSFont.smallSystemFontSize)
-        let mono  = NSFont.monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
-        let s = NSMutableAttributedString()
-        s.append(NSAttributedString(string: "         \(label)   ", attributes: [
-            .font: font, .foregroundColor: NSColor.tertiaryLabelColor,
-        ]))
-        s.append(NSAttributedString(string: tokens, attributes: [
-            .font: mono, .foregroundColor: NSColor.labelColor,
-        ]))
-        s.append(NSAttributedString(string: "   resets in  ", attributes: [
-            .font: font, .foregroundColor: NSColor.tertiaryLabelColor,
-        ]))
-        s.append(NSAttributedString(string: reset, attributes: [
-            .font: mono, .foregroundColor: NSColor.secondaryLabelColor,
-        ]))
-        return s
     }
 
     private func appendTool(menu: NSMenu, tool: ToolSummary) {
         let item = NSMenuItem()
         item.isEnabled = false
         let tok = tool.tokens7d > 0 ? "  \(Hud.formatTokens(tool.tokens7d))" : ""
-        let sess = tool.sessions7d > 0 ? "  \(tool.sessions7d)×/wk" : ""
+        let sess = tool.sessions7d > 0 ? "  \(tool.sessions7d)×/\(L10n.text("wk", "hf"))" : ""
         let model = tool.lastModel.map { "  \($0)" } ?? ""
         let line = "\(tool.name)\(tok)\(sess)\(model)"
         item.attributedTitle = NSAttributedString(
@@ -1094,7 +1627,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc func openDetail() {
         if detailWindow == nil {
-            detailWindow = DetailWindowController(onThemeChange: { [weak self] _ in self?.refresh() })
+            detailWindow = DetailWindowController(onThemeChange: { [weak self] _ in
+                self?.refresh()
+                self?.detailWindow?.load()
+            })
         }
         detailWindow?.show()
     }
