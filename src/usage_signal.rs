@@ -41,7 +41,11 @@ pub struct AgentUsage {
     #[serde(default)]
     pub session_5h_tokens: u64,
     #[serde(default)]
+    pub session_5h_percent: Option<f64>,
+    #[serde(default)]
     pub week_7d_tokens: u64,
+    #[serde(default)]
+    pub week_7d_percent: Option<f64>,
     #[serde(default)]
     pub active_session_tokens: u64,
     #[serde(default)]
@@ -198,6 +202,7 @@ impl UsageSnapshot {
     }
 }
 
+#[cfg(target_arch = "wasm32")]
 const SCRIPT: &str = include_str!("usage_signal.py");
 
 #[cfg(target_arch = "wasm32")]
@@ -239,9 +244,11 @@ pub fn collect(worktree: &zed::Worktree) -> UsageSnapshot {
 pub fn collect_native() -> UsageSnapshot {
     use std::process::Command;
 
-    let output = match Command::new("python3").arg("-c").arg(SCRIPT).output() {
+    let script_path = concat!(env!("CARGO_MANIFEST_DIR"), "/src/usage_signal.py");
+
+    let output = match Command::new("python3").arg(script_path).output() {
         Ok(out) => out,
-        Err(_) => match Command::new("python").arg("-c").arg(SCRIPT).output() {
+        Err(_) => match Command::new("python").arg(script_path).output() {
             Ok(out) => out,
             Err(error) => {
                 return UsageSnapshot::unavailable(format!("python spawn failed: {error}"));

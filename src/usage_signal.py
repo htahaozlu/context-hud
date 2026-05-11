@@ -32,10 +32,12 @@ extension sandbox in pure Rust would duplicate logic python3 ships natively.
 import glob
 import json
 import os
+import subprocess
 import sys
 import time
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
+from urllib import request
 
 NOW = time.time()
 WIN_SESSION = 5 * 3600
@@ -44,6 +46,8 @@ WIN_30D = 30 * 86400
 # A session is "active" if its last turn is within this window. 30 min covers
 # slow human-in-the-loop pauses without surfacing stale sessions as live.
 ACTIVE_WINDOW = 30 * 60
+CACHE_TTL_OK = 5 * 60
+CACHE_TTL_ERR = 15
 
 
 def parse_iso(value):
@@ -59,7 +63,9 @@ def empty_block():
     return {
         # live HUD
         "session_5h_tokens": 0,
+        "session_5h_percent": None,
         "week_7d_tokens": 0,
+        "week_7d_percent": None,
         "active_session_tokens": 0,
         "active_session_file": None,
         "active_session_started_at": None,
@@ -85,6 +91,141 @@ def empty_block():
         "session_5h_resets_at": None,
         "week_7d_resets_at": None,
     }
+
+
+def usage_cache_path():
+    home = os.environ.get("HOME", "")
+    if not home:
+        return None
+    return os.path.join(home, ".zed-context", "usage_api_cache.json")
+
+
+def load_usage_cache():
+    path = usage_cache_path()
+    if not path or not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            return json.load(fh)
+    except Exception:
+        return None
+
+
+def save_usage_cache(payload):
+    path = usage_cache_path()
+    if not path:
+        return
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh)
+    except Exception:
+        pass
+
+
+def read_claude_credentials():
+    home = os.environ.get("HOME", "")
+    if not home:
+        return None
+    now_ms = int(time.time() * 1000)
+
+    raw = None
+    try:
+        out = subprocess.run(
+            ["security", "find-generic-password", "-s", "Claude Code-credentials", "-w"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+        if out.returncode == 0:
+            raw = out.stdout.strip()
+    except Exception:
+        raw = None
+
+    if raw:
+        try:
+            data = json.loads(raw)
+            oauth = data.get("claudeAiOauth") or {}
+            token = oauth.get("accessToken")
+            expires_at = oauth.get("expiresAt")
+            if token and (expires_at is None or expires_at > now_ms):
+                return token
+        except Exception:
+            if raw.startswith("sk-ant"):
+                return raw
+
+    credentials_path = os.path.join(home, ".claude", ".credentials.json")
+    if not os.path.exists(credentials_path):
+        return None
+    try:
+        with open(credentials_path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        oauth = data.get("claudeAiOauth") or {}
+        token = oauth.get("accessToken")
+        expires_at = oauth.get("expiresAt")
+        if token and (expires_at is None or expires_at > now_ms):
+            return token
+    except Exception:
+        return None
+    return None
+
+
+def fetch_claude_usage_api():
+    cached = load_usage_cache()
+    now = int(time.time())
+    if cached:
+        ts = int(cached.get("timestamp", 0) or 0)
+        ttl = CACHE_TTL_OK if cached.get("ok") else CACHE_TTL_ERR
+        if ts > 0 and now - ts < ttl:
+            return cached.get("data")
+
+    token = read_claude_credentials()
+    if not token:
+        save_usage_cache({"timestamp": now, "ok": False, "data": None})
+        return None
+
+    req = request.Request(
+        "https://api.anthropic.com/api/oauth/usage",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "anthropic-beta": "oauth-2025-04-20",
+            "User-Agent": "claude-code/2.1",
+        },
+    )
+    try:
+        with request.urlopen(req, timeout=15) as resp:
+            if resp.status != 200:
+                save_usage_cache({"timestamp": now, "ok": False, "data": None})
+                return None
+            payload = json.loads(resp.read().decode("utf-8"))
+            save_usage_cache({"timestamp": now, "ok": True, "data": payload})
+            return payload
+    except Exception:
+        fallback = cached.get("data") if cached else None
+        save_usage_cache({"timestamp": now, "ok": False, "data": fallback})
+        return fallback
+
+
+def parse_usage_percent(value):
+    if isinstance(value, (int, float)):
+        return round(max(0.0, min(100.0, float(value))), 1)
+    return None
+
+
+def apply_claude_usage_api(out):
+    payload = fetch_claude_usage_api()
+    if not isinstance(payload, dict):
+        return out
+    five = payload.get("five_hour") or {}
+    seven = payload.get("seven_day") or {}
+    out["session_5h_percent"] = parse_usage_percent(five.get("utilization"))
+    out["week_7d_percent"] = parse_usage_percent(seven.get("utilization"))
+    if five.get("resets_at"):
+        out["session_5h_resets_at"] = five.get("resets_at")
+    if seven.get("resets_at"):
+        out["week_7d_resets_at"] = seven.get("resets_at")
+    return out
 
 
 def build_active_sessions(per_session):
@@ -306,7 +447,7 @@ def collect_claude():
     if week_7d_oldest is not None:
         ts = week_7d_oldest + WIN_WEEK
         out["week_7d_resets_at"] = datetime.fromtimestamp(ts, tz=timezone.utc).isoformat().replace("+00:00", "Z")
-    return out
+    return apply_claude_usage_api(out)
 
 
 def collect_codex():

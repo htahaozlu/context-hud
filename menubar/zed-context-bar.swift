@@ -259,7 +259,9 @@ struct ActiveSession {
 struct Agent {
     let name: String
     let session5h: UInt64
+    let session5hPercent: Double?
     let week7d: UInt64
+    let week7dPercent: Double?
     let activeSession: UInt64
     let model: String?
     let cwd: String?
@@ -280,8 +282,10 @@ struct Agent {
 
 final class Hud {
     let path: String
+    let usageCachePath: String
     init() {
         self.path = "\(NSHomeDirectory())/.zed-context/hud.json"
+        self.usageCachePath = "\(NSHomeDirectory())/.zed-context/usage_api_cache.json"
     }
 
     func load() -> (active: Agent?, all: [Agent], others: [ToolSummary]) {
@@ -292,7 +296,7 @@ final class Hud {
             return (nil, [], [])
         }
 
-        let claude = parse(root["claude"] as? [String: Any], name: "Claude")
+        let claude = parse(root["claude"] as? [String: Any], name: "Claude", overlay: parseClaudeUsageCache())
         let codex = parse(root["codex"] as? [String: Any], name: "Codex")
         let all = [claude, codex].compactMap { $0 }
         let active = all.max(by: {
@@ -316,7 +320,18 @@ final class Hud {
         }
     }
 
-    private func parse(_ raw: [String: Any]?, name: String) -> Agent? {
+    private func parseClaudeUsageCache() -> [String: Any]? {
+        guard
+            let data = try? Data(contentsOf: URL(fileURLWithPath: usageCachePath)),
+            let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let payload = root["data"] as? [String: Any]
+        else {
+            return nil
+        }
+        return payload
+    }
+
+    private func parse(_ raw: [String: Any]?, name: String, overlay: [String: Any]? = nil) -> Agent? {
         guard let raw else { return nil }
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -353,10 +368,19 @@ final class Hud {
             return iso.date(from: s) ?? isoNoFrac.date(from: s)
         }
 
+        let fiveHourOverlay = overlay?["five_hour"] as? [String: Any]
+        let sevenDayOverlay = overlay?["seven_day"] as? [String: Any]
+
         return Agent(
             name: name,
             session5h: (raw["session_5h_tokens"] as? UInt64) ?? UInt64(raw["session_5h_tokens"] as? Int ?? 0),
+            session5hPercent: (raw["session_5h_percent"] as? Double)
+                ?? (fiveHourOverlay?["utilization"] as? Double)
+                ?? (fiveHourOverlay?["used_percentage"] as? Double),
             week7d: (raw["week_7d_tokens"] as? UInt64) ?? UInt64(raw["week_7d_tokens"] as? Int ?? 0),
+            week7dPercent: (raw["week_7d_percent"] as? Double)
+                ?? (sevenDayOverlay?["utilization"] as? Double)
+                ?? (sevenDayOverlay?["used_percentage"] as? Double),
             activeSession: (raw["active_session_tokens"] as? UInt64) ?? UInt64(raw["active_session_tokens"] as? Int ?? 0),
             model: raw["last_model"] as? String,
             cwd: raw["last_cwd"] as? String,
@@ -365,8 +389,10 @@ final class Hud {
             lastTurn: ts,
             sessionStarted: started,
             activeSessions: actives,
-            session5hResetsAt: parseDate(raw["session_5h_resets_at"] as? String),
+            session5hResetsAt: parseDate(raw["session_5h_resets_at"] as? String)
+                ?? parseDate(fiveHourOverlay?["resets_at"] as? String),
             week7dResetsAt: parseDate(raw["week_7d_resets_at"] as? String)
+                ?? parseDate(sevenDayOverlay?["resets_at"] as? String)
         )
     }
 
@@ -396,6 +422,13 @@ final class Hud {
         if value >= 1_000_000 { return String(format: "%.1fM", Double(value) / 1_000_000.0) }
         if value >= 1_000 { return String(format: "%.1fk", Double(value) / 1_000.0) }
         return "\(value)"
+    }
+
+    static func formatUsageValue(percent: Double?, tokens: UInt64) -> String {
+        if let percent {
+            return String(format: "%.0f%%", percent)
+        }
+        return formatTokens(tokens)
     }
 
     static func relative(_ date: Date) -> String {
@@ -713,10 +746,10 @@ final class UsageViewController: NSViewController {
                              value: Hud.formatTokens(a.activeSession),
                              sub: L10n.text("\(sessDur) running", "\(sessDur) süredir aktif")),
             DualStatTileView(caption: L10n.text("5h window", "5s pencere"),
-                             value: Hud.formatTokens(a.session5h),
+                             value: Hud.formatUsageValue(percent: a.session5hPercent, tokens: a.session5h),
                              sub: L10n.text("resets in \(Hud.resetsIn(a.session5hResetsAt))", "\(Hud.resetsIn(a.session5hResetsAt)) sonra sıfırlanır")),
             DualStatTileView(caption: L10n.text("7d window", "7g pencere"),
-                             value: Hud.formatTokens(a.week7d),
+                             value: Hud.formatUsageValue(percent: a.week7dPercent, tokens: a.week7d),
                              sub: L10n.text("resets in \(Hud.resetsIn(a.week7dResetsAt))", "\(Hud.resetsIn(a.week7dResetsAt)) sonra sıfırlanır")),
         ])
         tiles.orientation = .horizontal
@@ -1591,7 +1624,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         ] {
             let view = LimitRowView(
                 label: label,
-                tokens: Hud.formatTokens(tokens),
+                tokens: label == "5h"
+                    ? Hud.formatUsageValue(percent: a.session5hPercent, tokens: tokens)
+                    : Hud.formatUsageValue(percent: a.week7dPercent, tokens: tokens),
                 reset: Hud.resetsIn(resetsAt)
             )
             view.frame = NSRect(x: 0, y: 0, width: 320, height: 22)
