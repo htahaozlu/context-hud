@@ -7,3 +7,5 @@ CLAUDE.md
 extension.wasm
 docs/sample-data/
 scripts/marketing-screenshot.sh
+__pycache__/
+*.pyc
