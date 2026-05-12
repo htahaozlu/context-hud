@@ -7,7 +7,6 @@ APP_NAME="ContextHUD.app"
 APP_PATH="$DIST_DIR/$APP_NAME"
 STAGE_DIR="$DIST_DIR/dmg-staging"
 DMG_PATH="$DIST_DIR/ContextHUD.dmg"
-TXT_SRC="$ROOT/packaging/macos/Install ContextHUD.txt"
 
 "$ROOT/scripts/build-menubar-app.sh"
 
@@ -15,7 +14,6 @@ rm -rf "$STAGE_DIR" "$DMG_PATH"
 mkdir -p "$STAGE_DIR"
 
 cp -R "$APP_PATH" "$STAGE_DIR/"
-cp "$TXT_SRC" "$STAGE_DIR/"
 ln -s /Applications "$STAGE_DIR/Applications"
 
 hdiutil create \

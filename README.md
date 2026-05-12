@@ -14,7 +14,7 @@
 
 <p align="center">
   <a href="https://github.com/htahaozlu/context-hud/releases/latest/download/ContextHUD.dmg">
-    <img src="docs/images/download-macos-cta.svg" alt="Download app for macOS" width="380">
+    <img src="docs/images/download-macos-cta.svg" alt="Download app for macOS" width="300">
   </a>
 </p>
 
