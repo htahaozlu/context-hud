@@ -5,15 +5,15 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
     <key>CFBundleDisplayName</key>
-    <string>Context Pilot Bar</string>
+    <string>ContextHUD</string>
     <key>CFBundleExecutable</key>
-    <string>context-pilot-bar</string>
+    <string>context-hud</string>
     <key>CFBundleIdentifier</key>
-    <string>com.htahaozlu.contextpilot.bar</string>
+    <string>com.htahaozlu.contexthud</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>Context Pilot Bar</string>
+    <string>ContextHUD</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>

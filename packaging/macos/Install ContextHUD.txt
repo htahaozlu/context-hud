@@ -1,7 +1,7 @@
-Context Pilot Bar
+ContextHUD
 
 Install
-1. Drag "Context Pilot Bar.app" into Applications.
+1. Drag "ContextHUD.app" into Applications.
 2. Open the app from Applications.
 3. If macOS warns about the app, allow it from System Settings if you trust the source.
 

@@ -1,14 +1,14 @@
-// context-pilot-bar
+// context-hud
 //
 // macOS menubar HUD for Claude Code + Codex CLI usage. Reads the structured
-// JSON sidecar at ~/.context-pilot/hud.json (kept fresh by the context-pilot
+// JSON sidecar at ~/.context-hud/hud.json (kept fresh by the context-hud
 // daemon) and renders:
 //   - menubar icon (SF Symbol "sparkles") + colored compact title with the
 //     currently-active agent, its project basename, and context %
 //   - dropdown listing every agent stacked, with project, model, tokens, and
 //     relative "last turn" time
 //
-// Build:   swiftc -O context-pilot-bar.swift -o ~/.cargo/bin/context-pilot-bar
+// Build:   swiftc -O context-hud.swift -o ~/.cargo/bin/context-hud
 //
 // Tiny by design: no third-party deps, no app bundle, AppKit + Foundation.
 
@@ -284,8 +284,8 @@ final class Hud {
     let path: String
     let usageCachePath: String
     init() {
-        self.path = "\(NSHomeDirectory())/.context-pilot/hud.json"
-        self.usageCachePath = "\(NSHomeDirectory())/.context-pilot/usage_api_cache.json"
+        self.path = "\(NSHomeDirectory())/.context-hud/hud.json"
+        self.usageCachePath = "\(NSHomeDirectory())/.context-hud/usage_api_cache.json"
     }
 
     func load() -> (active: Agent?, all: [Agent], others: [ToolSummary]) {
@@ -843,7 +843,7 @@ final class UsageViewController: NSViewController {
     }
 
     private func buildSparkline(forAgent name: String) -> NSView? {
-        let path = "\(NSHomeDirectory())/.context-pilot/hud.json"
+        let path = "\(NSHomeDirectory())/.context-hud/hud.json"
         guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let agent = root[name.lowercased()] as? [String: Any],
@@ -1279,7 +1279,7 @@ final class DetailWindowController: NSWindowController, NSWindowDelegate {
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered, defer: false
         )
-        window.title = L10n.text("context-pilot · usage", "context-pilot · kullanım")
+        window.title = L10n.text("context-hud · usage", "context-hud · kullanım")
         window.titlebarAppearsTransparent = true
         window.isReleasedWhenClosed = false
         window.center()
@@ -1296,7 +1296,7 @@ final class DetailWindowController: NSWindowController, NSWindowDelegate {
             tabVC.tabViewItems[0].label = L10n.text("Usage", "Kullanım")
             tabVC.tabViewItems[1].label = L10n.text("Settings", "Ayarlar")
         }
-        window?.title = L10n.text("context-pilot · usage", "context-pilot · kullanım")
+        window?.title = L10n.text("context-hud · usage", "context-hud · kullanım")
         usageVC.reload()
     }
     func windowShouldClose(_ sender: NSWindow) -> Bool { sender.orderOut(nil); return false }
@@ -1435,7 +1435,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         ))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(
-            title: L10n.text("Quit context-pilot-bar", "context-pilot-bar'dan çık"),
+            title: L10n.text("Quit ContextHUD", "ContextHUD'dan çık"),
             action: #selector(quit),
             keyEquivalent: "q"
         ))

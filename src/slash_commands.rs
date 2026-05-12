@@ -47,7 +47,7 @@ fn run_brief(worktree: Option<&zed::Worktree>) -> Result<zed::SlashCommandOutput
         Ok(paths) => format!(
             "Artifacts updated under `{}` (`{}`, `{}`, `{}`, `{}`, `{}`). \
              Agents can read `AGENT.md` directly.",
-            root.join(".context-pilot").display(),
+            root.join(".context-hud").display(),
             paths.state_path.display(),
             paths.now_brief_path.display(),
             paths.session_brief_path.display(),
@@ -61,7 +61,7 @@ fn run_brief(worktree: Option<&zed::Worktree>) -> Result<zed::SlashCommandOutput
 
     let text = format!(
         concat!(
-            "## Context Pilot Brief\n\n",
+            "## ContextHUD Brief\n\n",
             "- Branch: `{}`\n",
             "- Updated: `{}`\n",
             "- {}\n\n",
@@ -123,7 +123,7 @@ fn run_doctor(worktree: Option<&zed::Worktree>) -> Result<zed::SlashCommandOutpu
     let Some(worktree) = worktree else {
         return Ok(zed::SlashCommandOutput {
             text: concat!(
-                "## Context Pilot Doctor\n\n",
+                "## ContextHUD Doctor\n\n",
                 "- worktree: missing\n",
                 "- git binary: unknown\n",
                 "- process exec: unknown\n",
@@ -157,14 +157,14 @@ fn run_doctor(worktree: Option<&zed::Worktree>) -> Result<zed::SlashCommandOutpu
     };
 
     let next_step = if snapshot_result.is_ok() {
-        "Runtime basics look healthy. Next step: run `/brief` and inspect `.context-pilot/` artifacts."
+        "Runtime basics look healthy. Next step: run `/brief` and inspect `.context-hud/` artifacts."
     } else {
         "If `process exec` failed, check Zed's `granted_extension_capabilities` for `process:exec` and review `Zed.log`."
     };
 
     let text = format!(
         concat!(
-            "## Context Pilot Doctor\n\n",
+            "## ContextHUD Doctor\n\n",
             "- worktree: ok (`{}`)\n",
             "{}\n",
             "{}\n",

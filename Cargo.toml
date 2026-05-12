@@ -1,5 +1,5 @@
 [package]
-name = "context-pilot"
+name = "context-hud"
 version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
@@ -23,6 +23,6 @@ name = "snapshot"
 path = "examples/snapshot.rs"
 
 [[bin]]
-name = "context-pilot"
-path = "src/bin/context-pilot.rs"
+name = "context-hud"
+path = "src/bin/context-hud.rs"
 required-features = []

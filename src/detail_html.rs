@@ -1,6 +1,6 @@
 //! Detail page renderer.
 //!
-//! Produces `~/.context-pilot/detail.html`, a self-contained dark-themed HTML
+//! Produces `~/.context-hud/detail.html`, a self-contained dark-themed HTML
 //! report that the menubar app opens in a WKWebView. The report is a single
 //! full-page tabbed layout with no external assets.
 
@@ -502,7 +502,7 @@ fn html_escape(s: &str) -> String {
 }
 
 const HEAD: &str = r#"<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>context-pilot · usage</title>
+<html lang="en"><head><meta charset="utf-8"><title>context-hud · usage</title>
 <style>
 :root {
   color-scheme: light dark;

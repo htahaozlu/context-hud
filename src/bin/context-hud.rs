@@ -1,10 +1,10 @@
-//! Standalone CLI for the Context Pilot engine.
+//! Standalone CLI for the ContextHUD engine.
 //!
 //! Why this exists: Zed `extension_api` 0.7 has no install-time hook and no
 //! status-bar primitive, and Zed Preview's ACP agent threads do not surface
 //! extension slash commands at all. So the in-Zed extension is effectively
 //! one-shot. This binary makes the same engine usable without Zed at all —
-//! run once to refresh `.context-pilot/{hud.md,AGENT.md,state.json,...}`, or
+//! run once to refresh `.context-hud/{hud.md,AGENT.md,state.json,...}`, or
 //! run `watch` to keep the HUD live as a sidecar daemon.
 //!
 //! Subcommands:
@@ -13,7 +13,7 @@
 //!   `snapshot`     — same as `hud` but without printing the HUD body
 //!   `watch [secs]` — loop forever, refreshing every `secs` seconds (default 30)
 //!
-//! Example: `context-pilot watch 30 .` (or set up launchd to keep this alive).
+//! Example: `context-hud watch 30 .` (or set up launchd to keep this alive).
 
 use std::env;
 use std::path::{Path, PathBuf};
@@ -23,11 +23,11 @@ use std::time::Duration;
 
 use serde_json;
 
-use context_pilot::context_engine::{self, ContextSnapshot};
-use context_pilot::git_signal::{self, ChangeSummary, CommitSummary, GitSignals};
-use context_pilot::hud;
-use context_pilot::state_writer;
-use context_pilot::usage_signal;
+use context_hud::context_engine::{self, ContextSnapshot};
+use context_hud::git_signal::{self, ChangeSummary, CommitSummary, GitSignals};
+use context_hud::hud;
+use context_hud::state_writer;
+use context_hud::usage_signal;
 
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
@@ -68,14 +68,14 @@ fn main() {
 
 fn print_help() {
     eprintln!(
-        "context-pilot — Claude Code + Codex CLI usage HUD for any repo\n\n\
+        "context-hud — Claude Code + Codex CLI usage HUD for any repo\n\n\
          USAGE:\n\
-         \x20   context-pilot hud          [worktree_root]   refresh repo .context-pilot/hud.md\n\
-         \x20   context-pilot snapshot     [worktree_root]   refresh full repo artifacts\n\
-         \x20   context-pilot global                         write ~/.context-pilot/hud.md\n\
-         \x20   context-pilot watch        [secs] [root]     loop per-repo (default 30s)\n\
-         \x20   context-pilot watch-global [secs]            loop ~/.context-pilot/hud.md\n\n\
-         Pin `~/.context-pilot/hud.md` in Zed for an always-visible cross-project HUD.\n"
+         \x20   context-hud hud          [worktree_root]   refresh repo .context-hud/hud.md\n\
+         \x20   context-hud snapshot     [worktree_root]   refresh full repo artifacts\n\
+         \x20   context-hud global                         write ~/.context-hud/hud.md\n\
+         \x20   context-hud watch        [secs] [root]     loop per-repo (default 30s)\n\
+         \x20   context-hud watch-global [secs]            loop ~/.context-hud/hud.md\n\n\
+         Pin `~/.context-hud/hud.md` in Zed for an always-visible cross-project HUD.\n"
     );
 }
 
@@ -83,7 +83,7 @@ fn run_hud(root: Option<PathBuf>) -> i32 {
     match refresh(root) {
         Ok((root, snapshot)) => {
             print!("{}", hud::render(&snapshot, &snapshot.usage));
-            eprintln!("\nHUD written to {}/.context-pilot/hud.md", root.display());
+            eprintln!("\nHUD written to {}/.context-hud/hud.md", root.display());
             0
         }
         Err(error) => {
@@ -96,7 +96,7 @@ fn run_hud(root: Option<PathBuf>) -> i32 {
 fn run_snapshot(root: Option<PathBuf>) -> i32 {
     match refresh(root) {
         Ok((root, _)) => {
-            println!("artifacts refreshed in {}/.context-pilot/", root.display());
+            println!("artifacts refreshed in {}/.context-hud/", root.display());
             0
         }
         Err(error) => {
@@ -122,7 +122,7 @@ fn run_global() -> i32 {
 }
 
 fn run_watch_global(secs: u64) -> i32 {
-    eprintln!("context-pilot watch-global: every {secs}s. Ctrl-C to stop.");
+    eprintln!("context-hud watch-global: every {secs}s. Ctrl-C to stop.");
     loop {
         match refresh_global() {
             Ok(path) => eprintln!("[{}] refreshed {}", now_local(), path.display()),
@@ -136,7 +136,7 @@ fn refresh_global() -> Result<PathBuf, String> {
     use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
     let home = env::var("HOME").map_err(|_| "HOME not set".to_string())?;
-    let dir = PathBuf::from(&home).join(".context-pilot");
+    let dir = PathBuf::from(&home).join(".context-hud");
     std::fs::create_dir_all(&dir)
         .map_err(|error| format!("mkdir {} failed: {error}", dir.display()))?;
     let path = dir.join("hud.md");
@@ -168,7 +168,7 @@ fn refresh_global() -> Result<PathBuf, String> {
         .map_err(|error| format!("write {} failed: {error}", json_path.display()))?;
 
     // Detail page — opened by the menubar app's "Open detail" action.
-    let html = context_pilot::detail_html::render(&usage);
+    let html = context_hud::detail_html::render(&usage);
     let html_path = dir.join("detail.html");
     std::fs::write(&html_path, html.as_bytes())
         .map_err(|error| format!("write {} failed: {error}", html_path.display()))?;
@@ -176,7 +176,7 @@ fn refresh_global() -> Result<PathBuf, String> {
     Ok(path)
 }
 
-fn format_usage_row(label: &str, usage: &context_pilot::usage_signal::AgentUsage) -> String {
+fn format_usage_row(label: &str, usage: &context_hud::usage_signal::AgentUsage) -> String {
     let ctx = match (usage.last_context_pct, usage.last_context_window) {
         (Some(pct), Some(window)) => format!("{pct:.1}% of {}", fmt_tokens(window)),
         (Some(pct), None) => format!("{pct:.1}%"),
@@ -202,11 +202,11 @@ fn fmt_tokens(value: u64) -> String {
 }
 
 fn run_watch(root: Option<PathBuf>, secs: u64) -> i32 {
-    eprintln!("context-pilot watch: every {secs}s. Ctrl-C to stop.");
+    eprintln!("context-hud watch: every {secs}s. Ctrl-C to stop.");
     loop {
         match refresh(root.clone()) {
             Ok((root, _)) => eprintln!(
-                "[{}] refreshed {}/.context-pilot/hud.md",
+                "[{}] refreshed {}/.context-hud/hud.md",
                 now_local(),
                 root.display()
             ),

@@ -1,10 +1,27 @@
-# Context Pilot
+# ContextHUD
 
-Context Pilot generates persistent repository context for coding agents and exposes a lightweight usage HUD for Claude Code and Codex CLI. It started as a Zed extension experiment, but the current product surface is broader: a reusable context engine, a CLI, agent-readable artifacts, and an optional macOS menubar companion.
+<p align="left">
+  <a href="https://github.com/htahaozlu/context-hud/releases/latest">
+    <img alt="Latest release" src="https://img.shields.io/github/v/release/htahaozlu/context-hud?display_name=tag&label=version">
+  </a>
+  <a href="https://github.com/htahaozlu/context-hud/releases/latest/download/ContextHUD.dmg">
+    <img alt="Download for macOS" src="https://img.shields.io/badge/Download-macOS%20DMG-black?logo=apple">
+  </a>
+</p>
+
+ContextHUD generates persistent repository context for coding agents and exposes a lightweight usage HUD for Claude Code and Codex CLI. It started as a Zed extension experiment, but the current product surface is broader: a reusable context engine, a CLI, agent-readable artifacts, and an optional macOS companion app.
+
+## Download for macOS
+
+1. Open the latest release from the button above.
+2. Download `ContextHUD.dmg`.
+3. Drag `ContextHUD.app` into `Applications`.
+4. Launch the app once from `Applications`.
+5. Eject and delete the DMG. It is not needed after installation.
 
 ## What it does
 
-- Writes project artifacts under `.context-pilot/`
+- Writes project artifacts under `.context-hud/`
 - Produces a stable `AGENT.md` brief for local coding agents
 - Mirrors the same brief to `CLAUDE.md` for Claude Code compatibility
 - Summarizes repository activity across `now`, `session`, and `week` windows
@@ -15,12 +32,12 @@ Context Pilot generates persistent repository context for coding agents and expo
 
 Each refresh writes the following files:
 
-- `.context-pilot/state.json`
-- `.context-pilot/brief-now.md`
-- `.context-pilot/brief-session.md`
-- `.context-pilot/brief-week.md`
-- `.context-pilot/AGENT.md`
-- `.context-pilot/hud.md`
+- `.context-hud/state.json`
+- `.context-hud/brief-now.md`
+- `.context-hud/brief-session.md`
+- `.context-hud/brief-week.md`
+- `.context-hud/AGENT.md`
+- `.context-hud/hud.md`
 - `CLAUDE.md`
 
 Writes are atomic, so agents do not observe partial files mid-refresh.
@@ -45,33 +62,33 @@ cargo install --path .
 ### Refresh the current repository
 
 ```bash
-context-pilot hud
+context-hud hud
 ```
 
 ### Write all artifacts without printing the HUD
 
 ```bash
-context-pilot snapshot
+context-hud snapshot
 ```
 
 ### Keep repository artifacts fresh
 
 ```bash
-context-pilot watch 30 .
+context-hud watch 30 .
 ```
 
 ### Generate the global HUD
 
 ```bash
-context-pilot global
-context-pilot watch-global 30
+context-hud global
+context-hud watch-global 30
 ```
 
-The global HUD is written to `~/.context-pilot/hud.md`. Pin that file in Zed if you want a persistent cross-project tab.
+The global HUD is written to `~/.context-hud/hud.md`. Pin that file in Zed if you want a persistent cross-project tab.
 
 ## macOS app and DMG
 
-The repository includes packaging scripts for the optional menubar companion:
+The repository includes packaging scripts for the optional companion app:
 
 ```bash
 scripts/build-menubar-app.sh
@@ -80,14 +97,14 @@ scripts/create-macos-dmg.sh
 
 This produces:
 
-- `dist/Context Pilot Bar.app`
-- `dist/Context-Pilot-Bar.dmg`
+- `dist/ContextHUD.app`
+- `dist/ContextHUD.dmg`
 
 The DMG includes a short install note that tells users to drag the app into `Applications`, launch it once, then eject and delete the DMG.
 
 ## How the data is collected
 
-Context Pilot combines:
+ContextHUD combines:
 
 - Git branch, recent commits, and worktree status
 - File activity inferred from repository mtimes
@@ -100,15 +117,15 @@ No external service is required for the core repository summaries. Usage aggrega
 
 - Zed `extension_api` `0.7` does not expose a load-time worktree hook.
 - Zed does not yet expose a persistent HUD primitive for extensions.
-- Agent auto-injection is file-based today; agents read `.context-pilot/AGENT.md` or `CLAUDE.md`.
+- Agent auto-injection is file-based today; agents read `.context-hud/AGENT.md` or `CLAUDE.md`.
 
 Because of those limits, the CLI is the most reliable always-on surface today.
 
 ## Repository layout
 
 - `src/` core engine, artifact rendering, Zed integration, and usage aggregation
-- `src/bin/context-pilot.rs` standalone CLI entry point
-- `menubar/context-pilot-bar.swift` optional macOS menubar companion
+- `src/bin/context-hud.rs` standalone CLI entry point
+- `menubar/context-hud.swift` optional macOS companion app
 - `examples/snapshot.rs` native development harness
 
 ## Development

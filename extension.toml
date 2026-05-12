@@ -1,10 +1,10 @@
-id = "context-pilot"
-name = "Context Pilot"
+id = "context-hud"
+name = "ContextHUD"
 version = "0.1.0"
 schema_version = 1
 authors = ["OpenAI Codex"]
 description = "Persistent project context artifacts and agent-facing HUD for Zed."
-repository = "https://github.com/htahaozlu/context-pilot"
+repository = "https://github.com/htahaozlu/context-hud"
 
 [slash_commands.hello]
 description = "Inject a minimal worktree-aware greeting into the Assistant"

@@ -1,6 +1,6 @@
 //! HUD rendering.
 //!
-//! Produces `.context-pilot/hud.md`, the always-visible surface that mirrors
+//! Produces `.context-hud/hud.md`, the always-visible surface that mirrors
 //! claude-hud's session / week / context-percent panel for both Claude Code
 //! and Codex CLI. The file is plain markdown so it renders in any Zed buffer
 //! today; once a real status-bar extension API ships, the same fields will

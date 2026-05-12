@@ -10,7 +10,7 @@ Stdout: single JSON document. Layout:
   }
 
 AgentBlock contains:
-  - Live HUD fields (used by ~/.context-pilot/hud.json):
+  - Live HUD fields (used by ~/.context-hud/hud.json):
       session_5h_tokens, week_7d_tokens, active_session_tokens,
       active_session_file, last_turn_input_tokens, last_turn_output_tokens,
       last_model, last_context_window, last_context_pct, last_turn_at,
@@ -97,7 +97,7 @@ def usage_cache_path():
     home = os.environ.get("HOME", "")
     if not home:
         return None
-    return os.path.join(home, ".context-pilot", "usage_api_cache.json")
+    return os.path.join(home, ".context-hud", "usage_api_cache.json")
 
 
 def load_usage_cache():

@@ -3,11 +3,11 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="$ROOT/dist"
-APP_NAME="Context Pilot Bar.app"
+APP_NAME="ContextHUD.app"
 APP_PATH="$DIST_DIR/$APP_NAME"
 STAGE_DIR="$DIST_DIR/dmg-staging"
-DMG_PATH="$DIST_DIR/Context-Pilot-Bar.dmg"
-TXT_SRC="$ROOT/packaging/macos/Install Context Pilot Bar.txt"
+DMG_PATH="$DIST_DIR/ContextHUD.dmg"
+TXT_SRC="$ROOT/packaging/macos/Install ContextHUD.txt"
 
 "$ROOT/scripts/build-menubar-app.sh"
 
@@ -19,7 +19,7 @@ cp "$TXT_SRC" "$STAGE_DIR/"
 ln -s /Applications "$STAGE_DIR/Applications"
 
 hdiutil create \
-  -volname "Context Pilot Bar" \
+  -volname "ContextHUD" \
   -srcfolder "$STAGE_DIR" \
   -ov \
   -format UDZO \

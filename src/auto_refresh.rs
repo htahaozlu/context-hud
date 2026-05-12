@@ -1,7 +1,7 @@
 //! Automatic context refresh.
 //!
 //! Product goal: user installs the extension, opens Zed on a repo, and
-//! `.context-pilot/AGENT.md` plus `state.json` appear without them running a
+//! `.context-hud/AGENT.md` plus `state.json` appear without them running a
 //! command.
 //!
 //! Verified limit: as of `zed_extension_api` 0.7, no public extension hook
@@ -10,7 +10,7 @@
 //! refresh is wired into every such entry point as a side effect. Once Zed
 //! ships a load-time hook, the call site changes but [`refresh`] does not.
 //!
-//! Idempotency: a fresh `.context-pilot/state.json` (younger than
+//! Idempotency: a fresh `.context-hud/state.json` (younger than
 //! [`MIN_REFRESH_INTERVAL`]) short-circuits the work. This keeps repeat
 //! invocations cheap and avoids noisy churn when nothing meaningful changed.
 
@@ -43,7 +43,7 @@ pub fn refresh(worktree: &zed::Worktree) {
 #[cfg(target_arch = "wasm32")]
 fn try_refresh(worktree: &zed::Worktree) -> Result<(), String> {
     let root = PathBuf::from(worktree.root_path());
-    let state_path = root.join(".context-pilot").join("state.json");
+    let state_path = root.join(".context-hud").join("state.json");
     if is_fresh(&state_path) {
         return Ok(());
     }
