@@ -28,10 +28,6 @@
   <img alt="Platform" src="https://img.shields.io/badge/platform-macOS-7DCEA0">
 </p>
 
-<table>
-  <tr>
-    <td valign="top" width="58%">
-
 ### What it does
 
 ContextHUD solves two persistent problems in agent-driven development:
@@ -41,9 +37,6 @@ ContextHUD solves two persistent problems in agent-driven development:
 
 It addresses both through a local pipeline that continuously produces stable project summaries and a native macOS HUD for Claude Code and Codex activity.
 
-    </td>
-    <td valign="top" width="42%">
-
 ### Core surfaces
 
 - Repository snapshots under `.context-hud/`
@@ -51,10 +44,6 @@ It addresses both through a local pipeline that continuously produces stable pro
 - CLI for refresh, watch, and global views
 - Native AppKit menubar companion
 - Markdown and JSON artifacts for tooling
-
-    </td>
-  </tr>
-</table>
 
 ## Product Preview
 
