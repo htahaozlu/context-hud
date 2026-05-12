@@ -10,12 +10,16 @@ RESOURCES_DIR="$CONTENTS_DIR/Resources"
 PLIST_SRC="$ROOT/packaging/macos/ContextHUD-Info.plist"
 SWIFT_SRC="$ROOT/menubar/context-hud.swift"
 EXECUTABLE="$MACOS_DIR/context-hud"
+LOGO_SRC="$ROOT/logo.png"
 
 rm -rf "$APP_DIR"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 
 xcrun --sdk macosx swiftc -O "$SWIFT_SRC" -o "$EXECUTABLE"
 cp "$PLIST_SRC" "$CONTENTS_DIR/Info.plist"
+if [[ -f "$LOGO_SRC" ]]; then
+  cp "$LOGO_SRC" "$RESOURCES_DIR/logo.png"
+fi
 chmod +x "$EXECUTABLE"
 
 echo "Built $APP_DIR"

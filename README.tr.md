@@ -1,6 +1,10 @@
 # ContextHUD
 
 <p align="center">
+  <img src="logo.png" alt="ContextHUD logosu" width="360">
+</p>
+
+<p align="center">
   <a href="README.md">English</a> | Turkce
 </p>
 

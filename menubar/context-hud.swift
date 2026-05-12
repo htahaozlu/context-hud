@@ -284,8 +284,9 @@ final class Hud {
     let path: String
     let usageCachePath: String
     init() {
-        self.path = "\(NSHomeDirectory())/.context-hud/hud.json"
-        self.usageCachePath = "\(NSHomeDirectory())/.context-hud/usage_api_cache.json"
+        let env = ProcessInfo.processInfo.environment
+        self.path = env["CONTEXTHUD_HUD_PATH"] ?? "\(NSHomeDirectory())/.context-hud/hud.json"
+        self.usageCachePath = env["CONTEXTHUD_USAGE_CACHE_PATH"] ?? "\(NSHomeDirectory())/.context-hud/usage_api_cache.json"
     }
 
     func load() -> (active: Agent?, all: [Agent], others: [ToolSummary]) {
@@ -471,6 +472,10 @@ final class ProgressBarView: NSView {
         tint.setFill()
         fill.fill()
     }
+}
+
+final class FlippedView: NSView {
+    override var isFlipped: Bool { true }
 }
 
 /// Compact 30-day sparkline drawn with rounded mini bars. Highlights the most
@@ -661,13 +666,14 @@ final class UsageViewController: NSViewController {
     private let container = NSStackView()
 
     override func loadView() {
-        view = NSView()
+        view = FlippedView()
         scrollView.hasVerticalScroller = true
         scrollView.drawsBackground = false
+        scrollView.contentInsets = NSEdgeInsets(top: 18, left: 0, bottom: 0, right: 0)
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(scrollView)
 
-        let doc = NSView()
+        let doc = FlippedView()
         doc.translatesAutoresizingMaskIntoConstraints = false
         container.orientation = .vertical
         container.alignment = .leading
@@ -677,10 +683,10 @@ final class UsageViewController: NSViewController {
         scrollView.documentView = doc
 
         NSLayoutConstraint.activate([
-            scrollView.topAnchor.constraint(equalTo: view.topAnchor),
-            scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            scrollView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            scrollView.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
             doc.widthAnchor.constraint(equalTo: scrollView.widthAnchor),
             container.topAnchor.constraint(equalTo: doc.topAnchor, constant: 24),
             container.leadingAnchor.constraint(equalTo: doc.leadingAnchor, constant: 24),
@@ -703,15 +709,15 @@ final class UsageViewController: NSViewController {
             container.addArrangedSubview(empty)
             return
         }
-        for a in all {
-            let card = buildAgentCard(agent: a, isActive: a.name == active?.name)
-            container.addArrangedSubview(card)
-            card.widthAnchor.constraint(equalTo: container.widthAnchor).isActive = true
-        }
+        let primary = active ?? all[0]
+        let card = buildAgentCard(agent: primary, isActive: true, showsHeader: false)
+        container.addArrangedSubview(card)
+        card.widthAnchor.constraint(equalTo: container.widthAnchor).isActive = true
+
         if !others.isEmpty {
-            let card = buildOthersCard(tools: others)
-            container.addArrangedSubview(card)
-            card.widthAnchor.constraint(equalTo: container.widthAnchor).isActive = true
+            let othersCard = buildOthersCard(tools: others)
+            container.addArrangedSubview(othersCard)
+            othersCard.widthAnchor.constraint(equalTo: container.widthAnchor).isActive = true
         }
     }
 
@@ -719,7 +725,7 @@ final class UsageViewController: NSViewController {
     /// 30-day sparkline. All data visible by default — no disclosures. Each
     /// tile pairs a primary value with a faded sub-value so the user sees both
     /// "what" and "when/how much" without scanning multiple sections.
-    private func buildAgentCard(agent a: Agent, isActive: Bool) -> NSView {
+    private func buildAgentCard(agent a: Agent, isActive: Bool, showsHeader: Bool) -> NSView {
         let card = NSView()
         card.wantsLayer = true
         card.layer?.cornerRadius = 12
@@ -780,7 +786,10 @@ final class UsageViewController: NSViewController {
         stack.alignment = .leading
         stack.spacing = 14
         stack.translatesAutoresizingMaskIntoConstraints = false
-        stack.addArrangedSubview(header)
+        if showsHeader {
+            stack.addArrangedSubview(header)
+            header.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        }
         stack.addArrangedSubview(tiles)
 
         if let spark = buildSparkline(forAgent: a.name) {
@@ -794,7 +803,6 @@ final class UsageViewController: NSViewController {
             stack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 18),
             stack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -18),
             stack.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -18),
-            header.widthAnchor.constraint(equalTo: stack.widthAnchor),
             tiles.widthAnchor.constraint(equalTo: stack.widthAnchor),
         ])
         return card
@@ -1016,6 +1024,294 @@ final class ThemeCardView: NSView {
     }
 }
 
+struct AppMetadata {
+    let version: String
+    let build: String
+
+    static var current: AppMetadata {
+        let bundle = Bundle.main
+        let version = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        let build = bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+        return AppMetadata(
+            version: version ?? "0.1.0",
+            build: build ?? "1"
+        )
+    }
+
+    var versionLabel: String {
+        "v\(version)"
+    }
+
+    var detailedVersionLabel: String {
+        "v\(version) (\(build))"
+    }
+}
+
+func appLogoImage() -> NSImage? {
+    if let bundled = Bundle.main.url(forResource: "logo", withExtension: "png") {
+        return NSImage(contentsOf: bundled)
+    }
+    let repoLogo = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("logo.png")
+    return NSImage(contentsOf: repoLogo)
+}
+
+final class BrandMarkView: NSView {
+    var accentColor: NSColor = .controlAccentColor { didSet { needsDisplay = true } }
+    var secondaryAccentColor: NSColor = .systemTeal { didSet { needsDisplay = true } }
+
+    override var isFlipped: Bool { true }
+    override var intrinsicContentSize: NSSize { NSSize(width: 56, height: 56) }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let bounds = self.bounds.insetBy(dx: 1, dy: 1)
+        let bg = NSBezierPath(roundedRect: bounds, xRadius: 14, yRadius: 14)
+        let gradient = NSGradient(colors: [
+            accentColor.withAlphaComponent(0.95),
+            secondaryAccentColor.withAlphaComponent(0.95),
+        ])
+        gradient?.draw(in: bg, angle: -35)
+
+        let panelRect = bounds.insetBy(dx: 9, dy: 9)
+        let panel = NSBezierPath(roundedRect: panelRect, xRadius: 9, yRadius: 9)
+        NSColor.white.withAlphaComponent(0.16).setFill()
+        panel.fill()
+
+        let baseY = panelRect.maxY - 12
+        let widths: [CGFloat] = [7, 7, 7]
+        let heights: [CGFloat] = [13, 21, 29]
+        let gap: CGFloat = 5
+        var x = panelRect.minX + 8
+        for idx in 0..<3 {
+            let rect = NSRect(x: x, y: baseY - heights[idx], width: widths[idx], height: heights[idx])
+            let bar = NSBezierPath(roundedRect: rect, xRadius: 3.5, yRadius: 3.5)
+            NSColor.white.withAlphaComponent(idx == 2 ? 0.96 : 0.84).setFill()
+            bar.fill()
+            x += widths[idx] + gap
+        }
+    }
+}
+
+final class BrandHeaderView: NSView {
+    init(title: String, subtitle: String, metadata: AppMetadata = .current) {
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.cornerRadius = 16
+        layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+        layer?.borderWidth = 1
+        layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.45).cgColor
+        translatesAutoresizingMaskIntoConstraints = false
+
+        let logo = BrandMarkView()
+        logo.translatesAutoresizingMaskIntoConstraints = false
+
+        let eyebrow = NSTextField(labelWithString: metadata.versionLabel)
+        eyebrow.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .medium)
+        eyebrow.textColor = .secondaryLabelColor
+
+        let titleLabel = NSTextField(labelWithString: title)
+        titleLabel.font = NSFont.systemFont(ofSize: 18, weight: .semibold)
+
+        let subtitleLabel = NSTextField(wrappingLabelWithString: subtitle)
+        subtitleLabel.font = NSFont.systemFont(ofSize: 12)
+        subtitleLabel.textColor = .secondaryLabelColor
+        subtitleLabel.maximumNumberOfLines = 0
+
+        let metaRow = NSStackView(views: [
+            Self.makePillLabel(metadata.detailedVersionLabel),
+            Self.makePillLabel("macOS"),
+            Self.makePillLabel("Local-first")
+        ])
+        metaRow.orientation = .horizontal
+        metaRow.alignment = .top
+        metaRow.spacing = 8
+        metaRow.detachesHiddenViews = true
+        metaRow.setHuggingPriority(.defaultLow, for: .horizontal)
+
+        let textStack = NSStackView(views: [eyebrow, titleLabel, subtitleLabel, metaRow])
+        textStack.orientation = .vertical
+        textStack.alignment = .leading
+        textStack.spacing = 6
+        textStack.translatesAutoresizingMaskIntoConstraints = false
+
+        let root = NSStackView(views: [logo, textStack])
+        root.orientation = .horizontal
+        root.alignment = .top
+        root.spacing = 14
+        root.translatesAutoresizingMaskIntoConstraints = false
+
+        addSubview(root)
+        NSLayoutConstraint.activate([
+            logo.widthAnchor.constraint(equalToConstant: 56),
+            logo.heightAnchor.constraint(equalToConstant: 56),
+            root.topAnchor.constraint(equalTo: topAnchor, constant: 18),
+            root.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 18),
+            root.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -18),
+            root.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -18),
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    private static func makePillLabel(_ text: String) -> NSView {
+        let label = NSTextField(labelWithString: text)
+        label.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        label.textColor = .secondaryLabelColor
+
+        let container = NSView()
+        container.wantsLayer = true
+        container.layer?.cornerRadius = 7
+        container.layer?.backgroundColor = NSColor.quaternaryLabelColor.withAlphaComponent(0.12).cgColor
+        container.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.25).cgColor
+        container.layer?.borderWidth = 1
+        container.translatesAutoresizingMaskIntoConstraints = false
+        label.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(label)
+
+        NSLayoutConstraint.activate([
+            label.topAnchor.constraint(equalTo: container.topAnchor, constant: 5),
+            label.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
+            label.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
+            label.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -5),
+        ])
+        return container
+    }
+}
+
+final class AboutHeroView: NSView {
+    init(metadata: AppMetadata = .current) {
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+
+        let iconView = NSImageView()
+        iconView.image = appLogoImage()
+        iconView.imageScaling = .scaleProportionallyUpOrDown
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+
+        let title = NSTextField(labelWithString: "ContextHUD")
+        title.font = NSFont.systemFont(ofSize: 26, weight: .semibold)
+
+        let version = NSTextField(labelWithString: metadata.detailedVersionLabel)
+        version.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .medium)
+        version.textColor = .secondaryLabelColor
+
+        let note = NSTextField(wrappingLabelWithString: L10n.text(
+            "Native repository context and coding-agent usage visibility for macOS.",
+            "macOS icin native repository baglami ve coding-agent kullanim gorunurlugu."
+        ))
+        note.font = NSFont.systemFont(ofSize: 13)
+        note.textColor = .secondaryLabelColor
+        note.maximumNumberOfLines = 0
+
+        let stack = NSStackView(views: [title, version, note])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 6
+        stack.translatesAutoresizingMaskIntoConstraints = false
+
+        addSubview(iconView)
+        addSubview(stack)
+
+        NSLayoutConstraint.activate([
+            iconView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            iconView.topAnchor.constraint(equalTo: topAnchor),
+            iconView.widthAnchor.constraint(equalToConstant: 96),
+            iconView.heightAnchor.constraint(equalToConstant: 96),
+
+            stack.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 18),
+            stack.centerYAnchor.constraint(equalTo: iconView.centerYAnchor),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stack.topAnchor.constraint(greaterThanOrEqualTo: topAnchor),
+            stack.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor),
+
+            bottomAnchor.constraint(greaterThanOrEqualTo: iconView.bottomAnchor),
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+}
+
+final class ResponsiveInfoRowView: NSView {
+    init(title: String, value: String) {
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+
+        let titleLabel = NSTextField(wrappingLabelWithString: title)
+        titleLabel.font = NSFont.systemFont(ofSize: 12, weight: .medium)
+        titleLabel.maximumNumberOfLines = 0
+        titleLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        let valueLabel = NSTextField(wrappingLabelWithString: value)
+        valueLabel.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+        valueLabel.textColor = .secondaryLabelColor
+        valueLabel.maximumNumberOfLines = 0
+        valueLabel.alignment = .left
+        valueLabel.lineBreakMode = .byWordWrapping
+        valueLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        addSubview(titleLabel)
+        addSubview(valueLabel)
+
+        NSLayoutConstraint.activate([
+            titleLabel.topAnchor.constraint(equalTo: topAnchor),
+            titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor),
+            titleLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 132),
+            titleLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 168),
+
+            valueLabel.topAnchor.constraint(equalTo: topAnchor),
+            valueLabel.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor, constant: 14),
+            valueLabel.trailingAnchor.constraint(equalTo: trailingAnchor),
+            valueLabel.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+            titleLabel.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor),
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+}
+
+final class MenuHeaderView: NSView {
+    override var intrinsicContentSize: NSSize { NSSize(width: 324, height: 84) }
+
+    init(active: Agent?, metadata: AppMetadata = .current) {
+        super.init(frame: NSRect(x: 0, y: 0, width: 324, height: 84))
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.clear.cgColor
+
+        let title = NSTextField(labelWithString: "ContextHUD")
+        title.font = NSFont.systemFont(ofSize: 15, weight: .semibold)
+
+        let subtitleText = active.map {
+            let pct = $0.ctxPct.map { String(format: "%.0f%%", $0) } ?? "—"
+            return "\($0.name)  ·  \($0.project)  ·  \(pct)"
+        } ?? L10n.text("No active agent yet", "Henüz aktif ajan yok")
+        let subtitle = NSTextField(labelWithString: subtitleText)
+        subtitle.font = NSFont.systemFont(ofSize: 11)
+        subtitle.textColor = .secondaryLabelColor
+        subtitle.lineBreakMode = .byTruncatingTail
+
+        let version = NSTextField(labelWithString: metadata.detailedVersionLabel)
+        version.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .medium)
+        version.textColor = .tertiaryLabelColor
+
+        let textStack = NSStackView(views: [title, subtitle, version])
+        textStack.orientation = .vertical
+        textStack.alignment = .leading
+        textStack.spacing = 4
+        textStack.translatesAutoresizingMaskIntoConstraints = false
+
+        addSubview(textStack)
+        NSLayoutConstraint.activate([
+            textStack.topAnchor.constraint(equalTo: topAnchor, constant: 14),
+            textStack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
+            textStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
+            textStack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -14),
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+}
+
 /// Manages the menubar title element list: drag-to-reorder rows with a
 /// checkbox per element. Persists to `DisplayStore` on every change.
 final class DisplayTableController: NSObject, NSTableViewDataSource, NSTableViewDelegate {
@@ -1143,16 +1439,17 @@ class PreferencePaneViewController: NSViewController {
     let contentStack = NSStackView()
 
     override func loadView() {
-        view = NSView()
+        view = FlippedView()
         view.wantsLayer = true
         view.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
 
         scrollView.drawsBackground = false
         scrollView.hasVerticalScroller = true
+        scrollView.contentInsets = NSEdgeInsets(top: 18, left: 0, bottom: 0, right: 0)
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(scrollView)
 
-        let documentView = NSView()
+        let documentView = FlippedView()
         documentView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.documentView = documentView
 
@@ -1163,10 +1460,10 @@ class PreferencePaneViewController: NSViewController {
         documentView.addSubview(contentStack)
 
         NSLayoutConstraint.activate([
-            scrollView.topAnchor.constraint(equalTo: view.topAnchor),
-            scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            scrollView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            scrollView.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
             documentView.widthAnchor.constraint(equalTo: scrollView.widthAnchor),
             contentStack.topAnchor.constraint(equalTo: documentView.topAnchor, constant: 26),
             contentStack.leadingAnchor.constraint(equalTo: documentView.leadingAnchor, constant: 26),
@@ -1202,27 +1499,24 @@ class PreferencePaneViewController: NSViewController {
     }
 
     func makeInfoRow(title: String, value: String) -> NSView {
-        let titleLabel = NSTextField(labelWithString: title)
-        titleLabel.font = NSFont.systemFont(ofSize: 12, weight: .medium)
-
-        let valueLabel = NSTextField(labelWithString: value)
-        valueLabel.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
-        valueLabel.textColor = .secondaryLabelColor
-        valueLabel.alignment = .right
-        valueLabel.lineBreakMode = .byTruncatingMiddle
-
-        let row = NSStackView(views: [titleLabel, NSView(), valueLabel])
-        row.orientation = .horizontal
-        row.alignment = .firstBaseline
-        row.spacing = 8
-        row.translatesAutoresizingMaskIntoConstraints = false
-        return row
+        ResponsiveInfoRowView(title: title, value: value)
     }
 }
 
 final class GeneralSettingsViewController: PreferencePaneViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
+
+        addSection(
+            title: L10n.text("Overview", "Genel bakis"),
+            body: BrandHeaderView(
+                title: "ContextHUD",
+                subtitle: L10n.text(
+                    "Native repository context and coding-agent usage visibility, with local artifacts and a compact menubar surface.",
+                    "Yerel artifact uretimi ve kompakt bir menubar yuzeyiyle, repository baglami ve coding-agent kullanim gorunurlugu sunar."
+                )
+            )
+        )
 
         let overview = NSStackView(views: [
             makeInfoRow(title: L10n.text("Artifacts folder", "Artifact klasoru"), value: "\(NSHomeDirectory())/.context-hud"),
@@ -1363,7 +1657,6 @@ final class MenubarSettingsViewController: PreferencePaneViewController {
         displayTable.onChange = { [weak self] in
             self?.onThemeChange?(ThemeStore.current.id)
         }
-        displayTable.scrollView.widthAnchor.constraint(equalToConstant: 420).isActive = true
         displayTable.scrollView.heightAnchor.constraint(equalToConstant: 122).isActive = true
         addSection(
             title: L10n.text("Title content", "Baslik icerigi"),
@@ -1383,21 +1676,53 @@ final class MenubarSettingsViewController: PreferencePaneViewController {
 }
 
 final class AboutViewController: PreferencePaneViewController {
+    private let latestReleaseURL = URL(string: "https://github.com/htahaozlu/context-hud/releases/latest")!
+    private let changelogURL = URL(string: "https://github.com/htahaozlu/context-hud/blob/main/CHANGELOG.md")!
+
     override func viewDidLoad() {
         super.viewDidLoad()
 
-        let summary = NSTextField(wrappingLabelWithString: L10n.text(
-            "ContextHUD is a local companion for Claude Code and Codex. It keeps repository context files fresh and gives you a compact native window for usage visibility.",
-            "ContextHUD, Claude Code ve Codex icin yerel bir yardimci uygulamadir. Repo baglam dosyalarini guncel tutar ve kullanim gorunurlugu icin kompakt bir native pencere sunar."
-        ))
-        summary.font = NSFont.systemFont(ofSize: 12)
-        summary.maximumNumberOfLines = 0
         addSection(
-            title: L10n.text("About ContextHUD", "ContextHUD Hakkinda"),
-            body: summary
+            title: L10n.text("About", "Hakkinda"),
+            body: AboutHeroView()
+        )
+
+        let releaseNotes = NSTextField(wrappingLabelWithString: L10n.text(
+            "This build ships the native menubar companion, the Apple-style preferences window, and the compact usage report surface.",
+            "Bu surum native menubar yardimcisini, Apple tarzi ayarlar penceresini ve kompakt kullanim raporu yuzeyini getirir."
+        ))
+        releaseNotes.font = NSFont.systemFont(ofSize: 12)
+        releaseNotes.textColor = .secondaryLabelColor
+        releaseNotes.maximumNumberOfLines = 0
+        addSection(
+            title: L10n.text("What’s New", "Yenilikler"),
+            body: releaseNotes
+        )
+
+        let actions = NSStackView(views: [
+            makeActionButton(
+                title: L10n.text("Check for Updates", "Guncellemeleri kontrol et"),
+                action: #selector(checkForUpdates)
+            ),
+            makeActionButton(
+                title: L10n.text("View Changelog", "Degisiklik kaydini ac"),
+                action: #selector(openChangelog)
+            )
+        ])
+        actions.orientation = .horizontal
+        actions.alignment = .centerY
+        actions.spacing = 10
+        addSection(
+            title: L10n.text("Updates", "Guncellemeler"),
+            subtitle: L10n.text(
+                "ContextHUD releases are distributed from GitHub Releases.",
+                "ContextHUD surumleri GitHub Releases uzerinden dagitilir."
+            ),
+            body: actions
         )
 
         let locations = NSStackView(views: [
+            makeInfoRow(title: L10n.text("Version", "Surum"), value: AppMetadata.current.detailedVersionLabel),
             makeInfoRow(title: L10n.text("App bundle", "Uygulama paketi"), value: "dist/ContextHUD.app"),
             makeInfoRow(title: L10n.text("Disk image", "DMG"), value: "dist/ContextHUD.dmg"),
             makeInfoRow(title: L10n.text("Open window", "Pencereyi ac"), value: "⌘D"),
@@ -1413,6 +1738,21 @@ final class AboutViewController: PreferencePaneViewController {
             ),
             body: locations
         )
+    }
+
+    private func makeActionButton(title: String, action: Selector) -> NSButton {
+        let button = NSButton(title: title, target: self, action: action)
+        button.bezelStyle = .rounded
+        button.controlSize = .regular
+        return button
+    }
+
+    @objc private func checkForUpdates() {
+        NSWorkspace.shared.open(latestReleaseURL)
+    }
+
+    @objc private func openChangelog() {
+        NSWorkspace.shared.open(changelogURL)
     }
 }
 
@@ -1534,6 +1874,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 NSApp.terminate(nil)
             }
         }
+        if ProcessInfo.processInfo.environment["CONTEXTHUD_MENU_SCREENSHOT_PATH"] != nil {
+            // External script (marketing-screenshot.sh) handles the actual capture.
+            // This env var just prevents the timer so the app stays responsive.
+        }
 
         timer = Timer.scheduledTimer(
             timeInterval: 10.0,
@@ -1555,6 +1899,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem.button?.attributedTitle = composeTitle(active: active, theme: titleTheme)
 
         let menu = NSMenu()
+        let headerItem = NSMenuItem()
+        headerItem.isEnabled = false
+        headerItem.view = MenuHeaderView(active: active)
+        menu.addItem(headerItem)
+        menu.addItem(NSMenuItem.separator())
         if all.isEmpty {
             let empty = NSMenuItem(title: L10n.text("No agent data yet", "Henüz ajan verisi yok"), action: nil, keyEquivalent: "")
             empty.isEnabled = false
@@ -1641,7 +1990,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(themeRoot)
 
         menu.addItem(NSMenuItem(
-            title: L10n.text("Open usage window…", "Kullanım penceresini aç…"),
+            title: L10n.text("Open detail report…", "Detay raporunu aç…"),
             action: #selector(openDetail),
             keyEquivalent: "d"
         ))
@@ -1903,6 +2252,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             })
         }
         detailWindow?.show()
+    }
+
+    private func captureMenu(to path: String) {
+        // NSMenu popup is a system-managed CGWindow, not an NSWindow.
+        // Use CGWindowList to find the largest visible window owned by this process.
+        guard let list = CGWindowListCopyWindowInfo(
+            [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID
+        ) as? [[String: Any]] else { NSApp.terminate(nil); return }
+
+        let myPID = Int(ProcessInfo.processInfo.processIdentifier)
+        var bestID: CGWindowID = kCGNullWindowID
+        var bestArea: Double = 0
+
+        for info in list {
+            guard let pid = info[kCGWindowOwnerPID as String] as? Int, pid == myPID,
+                  let widInt = info[kCGWindowNumber as String] as? Int,
+                  let boundsAny = info[kCGWindowBounds as String] as? [String: Any],
+                  let w = boundsAny["Width"] as? Double,
+                  let h = boundsAny["Height"] as? Double,
+                  w > 150, h > 100
+            else { continue }
+            let area = w * h
+            if area > bestArea { bestArea = area; bestID = CGWindowID(widInt) }
+        }
+
+        guard bestID != kCGNullWindowID else { NSApp.terminate(nil); return }
+
+        // screencapture CLI has system-level screen recording access.
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+        task.arguments = ["-x", "-o", "-l", String(bestID), path]
+        try? task.run()
+        task.waitUntilExit()
+        NSApp.terminate(nil)
     }
 
     @objc func quit() {
