@@ -5,3 +5,5 @@ dist/
 AGENT.md
 CLAUDE.md
 extension.wasm
+docs/sample-data/
+scripts/marketing-screenshot.sh

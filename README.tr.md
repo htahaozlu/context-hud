@@ -59,17 +59,17 @@ Bu iki problemi, surekli kararlı proje ozetleri ureten yerel bir islem hattiyla
 
 ## Urun Onizlemesi
 
-Uygulamadan disa aktarildiktan sonra urun ekran goruntusunu buraya ekleyin:
+<p align="center">
+  <img src="docs/images/context-hud-screenshot.png" alt="ContextHUD yerel kullanim penceresi" width="100%">
+</p>
 
-```md
-![ContextHUD ekran goruntusu](docs/images/context-hud-screenshot.png)
-```
+Claude Code ve Codex icin surekli oturum gorunurlugune sahip yerel macOS kullanim penceresi.
 
-Onerilen goruntuler:
+<p align="center">
+  <img src="docs/images/context-hud-menubar.png" alt="ContextHUD menubar" width="400">
+</p>
 
-- menubar HUD acikken
-- yerel kullanim penceresi
-- uretilmis `.context-hud/` ciktilari gorunen bir depo
+Aktif ajan, proje ve baglam kullarimini gosteren kompakt menubar durum ogesi.
 
 ## ContextHUD neden var
 

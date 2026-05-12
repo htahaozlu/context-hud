@@ -57,6 +57,12 @@ It addresses both through a local pipeline that continuously produces stable pro
 
 Native macOS usage window with rolling session visibility for Claude Code and Codex.
 
+<p align="center">
+  <img src="docs/images/context-hud-menubar.png" alt="ContextHUD menubar" width="400">
+</p>
+
+Compact menubar status item showing active agent, project, and context usage.
+
 ## Why ContextHUD exists
 
 Modern coding agents need the same two things on every run:
