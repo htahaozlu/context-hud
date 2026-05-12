@@ -167,7 +167,7 @@ fn refresh_global() -> Result<PathBuf, String> {
     std::fs::write(&json_path, json.as_bytes())
         .map_err(|error| format!("write {} failed: {error}", json_path.display()))?;
 
-    // Detail page — opened by the menubar app's "Open detail" action.
+    // Optional HTML export for direct local viewing or sharing.
     let html = context_hud::detail_html::render(&usage);
     let html_path = dir.join("detail.html");
     std::fs::write(&html_path, html.as_bytes())

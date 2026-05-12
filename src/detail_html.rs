@@ -1,8 +1,8 @@
 //! Detail page renderer.
 //!
 //! Produces `~/.context-hud/detail.html`, a self-contained dark-themed HTML
-//! report that the menubar app opens in a WKWebView. The report is a single
-//! full-page tabbed layout with no external assets.
+//! export. The macOS menubar app uses a native AppKit window; this file exists
+//! as a standalone artifact for direct local viewing or sharing.
 
 use crate::usage_signal::{AccountInfo, AgentUsage, NamedBucket, SessionRecord, TimeBucket, ToolSummary, UsageSnapshot};
 

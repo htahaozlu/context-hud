@@ -654,7 +654,7 @@ final class DualStatTileView: NSView {
 
 /// Native Usage panel — rebuilt per refresh from hud.json. One card per agent
 /// with stat tiles, window progress bars, active-session strip, and a 30-day
-/// sparkline. Replaces the previous WKWebView approach so the panel feels at
+/// sparkline. Replaces the previous webview approach so the panel feels at
 /// home on macOS (no scrollbars, no font drift, no white flash).
 final class UsageViewController: NSViewController {
     private let scrollView = NSScrollView()
@@ -1116,141 +1116,215 @@ final class DisplayTableController: NSObject, NSTableViewDataSource, NSTableView
     }
 }
 
-final class SettingsViewController: NSViewController {
-    var onThemeChange: ((String) -> Void)?
-    private var cardViews: [(ThemeCardView, Theme)] = []
-    private var sepControl: NSSegmentedControl?
-    private var langControl: NSSegmentedControl?
-    private let displayTable = DisplayTableController()
+final class PreferenceSectionCard: NSView {
+    init(content: NSView) {
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.cornerRadius = 12
+        layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+        layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.45).cgColor
+        layer?.borderWidth = 1
+        translatesAutoresizingMaskIntoConstraints = false
 
-    override func loadView() { view = NSView() }
-    override func viewDidLoad() { super.viewDidLoad(); buildUI() }
+        content.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(content)
+        NSLayoutConstraint.activate([
+            content.topAnchor.constraint(equalTo: topAnchor, constant: 16),
+            content.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+            content.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+            content.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -16),
+        ])
+    }
+    required init?(coder: NSCoder) { fatalError() }
+}
 
-    private func buildUI() {
-        let scrollView = NSScrollView()
-        scrollView.hasVerticalScroller = true
+class PreferencePaneViewController: NSViewController {
+    let scrollView = NSScrollView()
+    let contentStack = NSStackView()
+
+    override func loadView() {
+        view = NSView()
+        view.wantsLayer = true
+        view.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+
         scrollView.drawsBackground = false
+        scrollView.hasVerticalScroller = true
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(scrollView)
+
+        let documentView = NSView()
+        documentView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.documentView = documentView
+
+        contentStack.orientation = .vertical
+        contentStack.alignment = .leading
+        contentStack.spacing = 20
+        contentStack.translatesAutoresizingMaskIntoConstraints = false
+        documentView.addSubview(contentStack)
+
         NSLayoutConstraint.activate([
             scrollView.topAnchor.constraint(equalTo: view.topAnchor),
             scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            documentView.widthAnchor.constraint(equalTo: scrollView.widthAnchor),
+            contentStack.topAnchor.constraint(equalTo: documentView.topAnchor, constant: 26),
+            contentStack.leadingAnchor.constraint(equalTo: documentView.leadingAnchor, constant: 26),
+            contentStack.trailingAnchor.constraint(equalTo: documentView.trailingAnchor, constant: -26),
+            contentStack.bottomAnchor.constraint(equalTo: documentView.bottomAnchor, constant: -26),
         ])
-        let container = NSView()
-        container.translatesAutoresizingMaskIntoConstraints = false
-        scrollView.documentView = container
-        cardViews = []
-        for theme in Theme.all {
+    }
+
+    func addSection(title: String, subtitle: String? = nil, body: NSView) {
+        let section = NSStackView()
+        section.orientation = .vertical
+        section.alignment = .leading
+        section.spacing = 8
+        section.translatesAutoresizingMaskIntoConstraints = false
+
+        let titleLabel = NSTextField(labelWithString: title)
+        titleLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        section.addArrangedSubview(titleLabel)
+
+        if let subtitle, !subtitle.isEmpty {
+            let subtitleLabel = NSTextField(wrappingLabelWithString: subtitle)
+            subtitleLabel.font = NSFont.systemFont(ofSize: 11)
+            subtitleLabel.textColor = .secondaryLabelColor
+            subtitleLabel.maximumNumberOfLines = 0
+            section.addArrangedSubview(subtitleLabel)
+        }
+
+        let card = PreferenceSectionCard(content: body)
+        section.addArrangedSubview(card)
+        contentStack.addArrangedSubview(section)
+        section.widthAnchor.constraint(equalTo: contentStack.widthAnchor).isActive = true
+        card.widthAnchor.constraint(equalTo: contentStack.widthAnchor).isActive = true
+    }
+
+    func makeInfoRow(title: String, value: String) -> NSView {
+        let titleLabel = NSTextField(labelWithString: title)
+        titleLabel.font = NSFont.systemFont(ofSize: 12, weight: .medium)
+
+        let valueLabel = NSTextField(labelWithString: value)
+        valueLabel.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+        valueLabel.textColor = .secondaryLabelColor
+        valueLabel.alignment = .right
+        valueLabel.lineBreakMode = .byTruncatingMiddle
+
+        let row = NSStackView(views: [titleLabel, NSView(), valueLabel])
+        row.orientation = .horizontal
+        row.alignment = .firstBaseline
+        row.spacing = 8
+        row.translatesAutoresizingMaskIntoConstraints = false
+        return row
+    }
+}
+
+final class GeneralSettingsViewController: PreferencePaneViewController {
+    override func viewDidLoad() {
+        super.viewDidLoad()
+
+        let overview = NSStackView(views: [
+            makeInfoRow(title: L10n.text("Artifacts folder", "Artifact klasoru"), value: "\(NSHomeDirectory())/.context-hud"),
+            makeInfoRow(title: L10n.text("Repository brief", "Repo brifi"), value: ".context-hud/AGENT.md"),
+            makeInfoRow(title: L10n.text("Claude compatibility", "Claude uyumlulugu"), value: "CLAUDE.md"),
+        ])
+        overview.orientation = .vertical
+        overview.spacing = 10
+        addSection(
+            title: L10n.text("Repository context", "Repo baglami"),
+            subtitle: L10n.text(
+                "ContextHUD keeps a stable local brief and machine-readable sidecars so agents can re-enter a project with less drift.",
+                "ContextHUD, ajanlarin projeye daha az kayma ile geri donebilmesi icin sabit bir yerel brief ve makinece okunabilir yan dosyalar uretir."
+            ),
+            body: overview
+        )
+
+        let sources = NSStackView(views: [
+            makeInfoRow(title: "Git", value: L10n.text("branch, commits, worktree", "branch, commit, worktree")),
+            makeInfoRow(title: "Claude Code", value: "~/.claude/projects/**/*.jsonl"),
+            makeInfoRow(title: "Codex CLI", value: "~/.codex/sessions/**/*.jsonl"),
+            makeInfoRow(title: "Output", value: "~/.context-hud/hud.json"),
+        ])
+        sources.orientation = .vertical
+        sources.spacing = 10
+        addSection(
+            title: L10n.text("Data sources", "Veri kaynaklari"),
+            subtitle: L10n.text(
+                "Usage is built locally from existing transcript files. No remote service is required for the core summaries.",
+                "Kullanim ozeti mevcut transcript dosyalarindan yerelde olusturulur. Temel ozetler icin uzak bir servis gerekmez."
+            ),
+            body: sources
+        )
+    }
+}
+
+final class AppearanceSettingsViewController: PreferencePaneViewController {
+    var onThemeChange: ((String) -> Void)?
+    private var cardViews: [(ThemeCardView, Theme)] = []
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        buildUI()
+    }
+
+    private func buildUI() {
+        cardViews = Theme.all.map { theme in
             let card = ThemeCardView(theme: theme)
             card.isSelected = theme.id == ThemeStore.current.id
             card.translatesAutoresizingMaskIntoConstraints = false
-            let t = theme
             card.onSelect = { [weak self] in
-                ThemeStore.set(t.id)
+                ThemeStore.set(theme.id)
                 self?.updateCardSelection()
-                self?.onThemeChange?(t.id)
+                self?.onThemeChange?(theme.id)
             }
-            cardViews.append((card, theme))
+            return (card, theme)
         }
-        let row1 = NSStackView(views: cardViews[0..<3].map { $0.0 as NSView })
-        row1.orientation = .horizontal; row1.spacing = 12; row1.translatesAutoresizingMaskIntoConstraints = false
-        let row2 = NSStackView(views: cardViews[3..<6].map { $0.0 as NSView })
-        row2.orientation = .horizontal; row2.spacing = 12; row2.translatesAutoresizingMaskIntoConstraints = false
-        let themeGrid = NSStackView(views: [row1, row2])
-        themeGrid.orientation = .vertical; themeGrid.spacing = 10; themeGrid.alignment = .leading
-        themeGrid.translatesAutoresizingMaskIntoConstraints = false
-        let titleLabel = NSTextField(labelWithString: "Appearance")
-        titleLabel.stringValue = L10n.text("Appearance", "Görünüm")
-        titleLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
-        let descLabel = NSTextField(labelWithString: L10n.text(
-            "Choose a color theme for the menubar and status bar.",
-            "Menubar ve durum çubuğu için bir renk teması seçin."
-        ))
-        descLabel.font = NSFont.systemFont(ofSize: 11)
-        descLabel.textColor = .secondaryLabelColor
 
-        let langTitle = NSTextField(labelWithString: L10n.text("Language", "Dil"))
-        langTitle.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
-        let langDesc = NSTextField(labelWithString: L10n.text(
-            "Use system language automatically or force English/Turkish.",
-            "Sistem dilini otomatik kullanın veya İngilizce/Türkçe zorlayın."
-        ))
-        langDesc.font = NSFont.systemFont(ofSize: 11)
-        langDesc.textColor = .secondaryLabelColor
-        let langSeg = NSSegmentedControl(
+        let rows = stride(from: 0, to: cardViews.count, by: 3).map { start -> NSStackView in
+            let end = min(start + 3, cardViews.count)
+            let row = NSStackView(views: cardViews[start..<end].map { $0.0 as NSView })
+            row.orientation = .horizontal
+            row.spacing = 12
+            row.distribution = .fillEqually
+            row.translatesAutoresizingMaskIntoConstraints = false
+            return row
+        }
+        let themeGrid = NSStackView(views: rows)
+        themeGrid.orientation = .vertical
+        themeGrid.spacing = 12
+        addSection(
+            title: L10n.text("Theme", "Tema"),
+            subtitle: L10n.text(
+                "Pick the menubar palette that matches your desktop. The preview uses the same typography and accent logic shown in the status item.",
+                "Masaustune en uygun menubar paletini secin. Onizleme, durum cubugunda kullanilan ayni tipografi ve vurgu mantigini gosterir."
+            ),
+            body: themeGrid
+        )
+        cardViews.forEach { $0.0.heightAnchor.constraint(equalToConstant: 82).isActive = true }
+
+        let langControl = NSSegmentedControl(
             labels: AppLanguage.allCases.map(\.label),
             trackingMode: .selectOne,
             target: self,
             action: #selector(languageChanged(_:))
         )
-        langSeg.selectedSegment = AppLanguage.allCases.firstIndex(of: LanguageStore.selected) ?? 0
-        langSeg.translatesAutoresizingMaskIntoConstraints = false
-        langControl = langSeg
-
-        // Separator section
-        let sepTitle = NSTextField(labelWithString: L10n.text("Separator", "Ayraç"))
-        sepTitle.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
-        let sepDesc = NSTextField(labelWithString: L10n.text(
-            "Character shown between agent name, project, and context %.",
-            "Ajan adı, proje ve bağlam % arasında gösterilen karakter."
-        ))
-        sepDesc.font = NSFont.systemFont(ofSize: 11)
-        sepDesc.textColor = .secondaryLabelColor
-
-        let seg = NSSegmentedControl(
-            labels: SeparatorStore.options.map { $0.label },
-            trackingMode: .selectOne,
-            target: self,
-            action: #selector(separatorChanged(_:))
+        langControl.selectedSegment = AppLanguage.allCases.firstIndex(of: LanguageStore.selected) ?? 0
+        addSection(
+            title: L10n.text("Language", "Dil"),
+            subtitle: L10n.text(
+                "Follow the system language or pin the UI to English or Turkish.",
+                "Arayuzu sistem diline birakin ya da Ingilizce/Turkce olarak sabitleyin."
+            ),
+            body: langControl
         )
-        seg.selectedSegment = SeparatorStore.currentIndex
-        seg.translatesAutoresizingMaskIntoConstraints = false
-        sepControl = seg
-
-        // Display elements section — reorder + toggle each menubar title element.
-        let dispTitle = NSTextField(labelWithString: L10n.text("Menubar Title", "Menubar Başlığı"))
-        dispTitle.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
-        let dispDesc = NSTextField(labelWithString: L10n.text(
-            "Toggle and drag to reorder which parts appear in the menubar title.",
-            "Menubar başlığında görünecek parçaları açın/kapatın ve sürükleyerek sıralayın."
-        ))
-        dispDesc.font = NSFont.systemFont(ofSize: 11)
-        dispDesc.textColor = .secondaryLabelColor
-        displayTable.onChange = { [weak self] in self?.onThemeChange?(ThemeStore.current.id) }
-
-        let mainStack = NSStackView(views: [
-            titleLabel, descLabel, themeGrid,
-            langTitle, langDesc, langSeg,
-            sepTitle, sepDesc, seg,
-            dispTitle, dispDesc, displayTable.scrollView,
-        ])
-        mainStack.orientation = .vertical; mainStack.alignment = .leading; mainStack.spacing = 12
-        mainStack.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(mainStack)
-        NSLayoutConstraint.activate([
-            mainStack.topAnchor.constraint(equalTo: container.topAnchor, constant: 24),
-            mainStack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 24),
-            mainStack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -24),
-            mainStack.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor, constant: -24),
-            container.widthAnchor.constraint(equalTo: scrollView.widthAnchor),
-            row1.widthAnchor.constraint(equalTo: themeGrid.widthAnchor),
-            row2.widthAnchor.constraint(equalTo: themeGrid.widthAnchor),
-            displayTable.scrollView.widthAnchor.constraint(equalToConstant: 360),
-            displayTable.scrollView.heightAnchor.constraint(equalToConstant: 120),
-        ] + cardViews.map { $0.0.heightAnchor.constraint(equalToConstant: 76) })
     }
 
     private func updateCardSelection() {
         let current = ThemeStore.current.id
-        for (card, theme) in cardViews { card.isSelected = theme.id == current }
-    }
-
-    @objc private func separatorChanged(_ sender: NSSegmentedControl) {
-        let value = SeparatorStore.options[sender.selectedSegment].value
-        SeparatorStore.set(value)
-        onThemeChange?(ThemeStore.current.id)
+        for (card, theme) in cardViews {
+            card.isSelected = theme.id == current
+        }
     }
 
     @objc private func languageChanged(_ sender: NSSegmentedControl) {
@@ -1260,46 +1334,179 @@ final class SettingsViewController: NSViewController {
     }
 }
 
+final class MenubarSettingsViewController: PreferencePaneViewController {
+    var onThemeChange: ((String) -> Void)?
+    private let displayTable = DisplayTableController()
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        buildUI()
+    }
+
+    private func buildUI() {
+        let sepControl = NSSegmentedControl(
+            labels: SeparatorStore.options.map { $0.label },
+            trackingMode: .selectOne,
+            target: self,
+            action: #selector(separatorChanged(_:))
+        )
+        sepControl.selectedSegment = SeparatorStore.currentIndex
+        addSection(
+            title: L10n.text("Separator", "Ayrac"),
+            subtitle: L10n.text(
+                "Character shown between agent, project, and context values in the menubar title.",
+                "Menubar basliginda ajan, proje ve baglam degerleri arasinda gosterilen karakter."
+            ),
+            body: sepControl
+        )
+
+        displayTable.onChange = { [weak self] in
+            self?.onThemeChange?(ThemeStore.current.id)
+        }
+        displayTable.scrollView.widthAnchor.constraint(equalToConstant: 420).isActive = true
+        displayTable.scrollView.heightAnchor.constraint(equalToConstant: 122).isActive = true
+        addSection(
+            title: L10n.text("Title content", "Baslik icerigi"),
+            subtitle: L10n.text(
+                "Toggle and drag to reorder which fields appear in the live menubar title.",
+                "Canli menubar basliginda gorunen alanlari acip kapatin ve surukleyerek siralayin."
+            ),
+            body: displayTable.scrollView
+        )
+    }
+
+    @objc private func separatorChanged(_ sender: NSSegmentedControl) {
+        let value = SeparatorStore.options[sender.selectedSegment].value
+        SeparatorStore.set(value)
+        onThemeChange?(ThemeStore.current.id)
+    }
+}
+
+final class AboutViewController: PreferencePaneViewController {
+    override func viewDidLoad() {
+        super.viewDidLoad()
+
+        let summary = NSTextField(wrappingLabelWithString: L10n.text(
+            "ContextHUD is a local companion for Claude Code and Codex. It keeps repository context files fresh and gives you a compact native window for usage visibility.",
+            "ContextHUD, Claude Code ve Codex icin yerel bir yardimci uygulamadir. Repo baglam dosyalarini guncel tutar ve kullanim gorunurlugu icin kompakt bir native pencere sunar."
+        ))
+        summary.font = NSFont.systemFont(ofSize: 12)
+        summary.maximumNumberOfLines = 0
+        addSection(
+            title: L10n.text("About ContextHUD", "ContextHUD Hakkinda"),
+            body: summary
+        )
+
+        let locations = NSStackView(views: [
+            makeInfoRow(title: L10n.text("App bundle", "Uygulama paketi"), value: "dist/ContextHUD.app"),
+            makeInfoRow(title: L10n.text("Disk image", "DMG"), value: "dist/ContextHUD.dmg"),
+            makeInfoRow(title: L10n.text("Open window", "Pencereyi ac"), value: "⌘D"),
+            makeInfoRow(title: L10n.text("Refresh", "Yenile"), value: "⌘R"),
+        ])
+        locations.orientation = .vertical
+        locations.spacing = 10
+        addSection(
+            title: L10n.text("Files and shortcuts", "Dosyalar ve kisayollar"),
+            subtitle: L10n.text(
+                "Build artifacts live in the repository. Runtime data stays under your home directory.",
+                "Build artefact'lari repo icinde kalir. Calisma verileri home dizini altinda tutulur."
+            ),
+            body: locations
+        )
+    }
+}
+
 final class DetailWindowController: NSWindowController, NSWindowDelegate {
     private let tabVC = NSTabViewController()
     let usageVC = UsageViewController()
-    private let settingsVC: SettingsViewController
+    private let generalVC = GeneralSettingsViewController()
+    private let appearanceVC = AppearanceSettingsViewController()
+    private let menubarVC = MenubarSettingsViewController()
+    private let aboutVC = AboutViewController()
 
     init(onThemeChange: @escaping (String) -> Void) {
-        self.settingsVC = SettingsViewController()
+        super.init(window: nil)
+
+        tabVC.tabStyle = .toolbar
+
         let usageItem = NSTabViewItem(viewController: usageVC)
-        usageItem.label = L10n.text("Usage", "Kullanım")
-        let settingsItem = NSTabViewItem(viewController: settingsVC)
-        settingsItem.label = L10n.text("Settings", "Ayarlar")
-        tabVC.tabStyle = .segmentedControlOnTop
-        tabVC.addTabViewItem(usageItem)
-        tabVC.addTabViewItem(settingsItem)
+        usageItem.label = L10n.text("Usage", "Kullanim")
+        usageItem.image = NSImage(systemSymbolName: "chart.bar.xaxis", accessibilityDescription: usageItem.label)
+
+        let generalItem = NSTabViewItem(viewController: generalVC)
+        generalItem.label = L10n.text("General", "Genel")
+        generalItem.image = NSImage(systemSymbolName: "slider.horizontal.3", accessibilityDescription: generalItem.label)
+
+        let appearanceItem = NSTabViewItem(viewController: appearanceVC)
+        appearanceItem.label = L10n.text("Appearance", "Gorunum")
+        appearanceItem.image = NSImage(systemSymbolName: "paintpalette", accessibilityDescription: appearanceItem.label)
+
+        let menubarItem = NSTabViewItem(viewController: menubarVC)
+        menubarItem.label = L10n.text("Menubar", "Menubar")
+        menubarItem.image = NSImage(systemSymbolName: "menubar.rectangle", accessibilityDescription: menubarItem.label)
+
+        let aboutItem = NSTabViewItem(viewController: aboutVC)
+        aboutItem.label = L10n.text("About", "Hakkinda")
+        aboutItem.image = NSImage(systemSymbolName: "info.circle", accessibilityDescription: aboutItem.label)
+
+        [usageItem, generalItem, appearanceItem, menubarItem, aboutItem].forEach(tabVC.addTabViewItem)
+
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 980, height: 740),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
-            backing: .buffered, defer: false
+            contentRect: NSRect(x: 0, y: 0, width: 980, height: 760),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            backing: .buffered,
+            defer: false
         )
-        window.title = L10n.text("context-hud · usage", "context-hud · kullanım")
-        window.titlebarAppearsTransparent = true
+        window.title = "ContextHUD"
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = false
+        window.toolbarStyle = .preference
         window.isReleasedWhenClosed = false
         window.center()
         window.contentViewController = tabVC
-        super.init(window: window)
+        self.window = window
         window.delegate = self
-        settingsVC.onThemeChange = onThemeChange
+
+        appearanceVC.onThemeChange = onThemeChange
+        menubarVC.onThemeChange = onThemeChange
     }
     required init?(coder: NSCoder) { fatalError() }
 
-    func show() { load(); window?.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true) }
+    func show() {
+        load()
+        window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
     func load() {
-        if tabVC.tabViewItems.count >= 2 {
-            tabVC.tabViewItems[0].label = L10n.text("Usage", "Kullanım")
-            tabVC.tabViewItems[1].label = L10n.text("Settings", "Ayarlar")
-        }
-        window?.title = L10n.text("context-hud · usage", "context-hud · kullanım")
         usageVC.reload()
     }
-    func windowShouldClose(_ sender: NSWindow) -> Bool { sender.orderOut(nil); return false }
+
+    func selectTab(index: Int) {
+        guard index >= 0, index < tabVC.tabViewItems.count else { return }
+        tabVC.selectedTabViewItemIndex = index
+    }
+
+    func capture(to path: String) {
+        load()
+        if let rawIndex = ProcessInfo.processInfo.environment["CONTEXTHUD_SELECT_TAB"],
+           let index = Int(rawIndex) {
+            selectTab(index: index)
+        }
+        guard let window, let targetView = window.contentView?.superview ?? window.contentView else { return }
+        window.displayIfNeeded()
+        targetView.layoutSubtreeIfNeeded()
+        let bounds = targetView.bounds
+        guard let rep = targetView.bitmapImageRepForCachingDisplay(in: bounds) else { return }
+        targetView.cacheDisplay(in: bounds, to: rep)
+        guard let data = rep.representation(using: .png, properties: [:]) else { return }
+        try? data.write(to: URL(fileURLWithPath: path))
+    }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        sender.orderOut(nil)
+        return false
+    }
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
@@ -1317,6 +1524,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // No icon — title-only menubar entry to save horizontal space.
 
         refresh()
+        if ProcessInfo.processInfo.environment["CONTEXTHUD_OPEN_WINDOW"] == "1" {
+            openDetail()
+        }
+        if let screenshotPath = ProcessInfo.processInfo.environment["CONTEXTHUD_SCREENSHOT_PATH"] {
+            openDetail()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+                self?.detailWindow?.capture(to: screenshotPath)
+                NSApp.terminate(nil)
+            }
+        }
 
         timer = Timer.scheduledTimer(
             timeInterval: 10.0,
@@ -1424,7 +1641,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(themeRoot)
 
         menu.addItem(NSMenuItem(
-            title: L10n.text("Open detail report…", "Detay raporunu aç…"),
+            title: L10n.text("Open usage window…", "Kullanım penceresini aç…"),
             action: #selector(openDetail),
             keyEquivalent: "d"
         ))
