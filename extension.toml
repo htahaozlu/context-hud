@@ -3,7 +3,7 @@ name = "ContextHUD"
 version = "0.1.0"
 schema_version = 1
 authors = ["OpenAI Codex"]
-description = "Persistent project context artifacts and agent-facing HUD for Zed."
+description = "Local-first repository context artifacts and native macOS HUD for coding agents."
 repository = "https://github.com/htahaozlu/context-hud"
 
 [slash_commands.hello]

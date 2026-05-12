@@ -1,0 +1,35 @@
+name: Feature request
+description: Propose a product or developer experience improvement
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please focus on the user problem first. Concrete workflows are more useful than broad ideas.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: What workflow or limitation are you trying to solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the behavior you want to see.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Describe workarounds or competing approaches you considered.
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Include screenshots, mockups, related tools, or prior art if helpful.
+

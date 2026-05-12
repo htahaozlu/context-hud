@@ -1,0 +1,9 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and usage help
+    url: https://github.com/htahaozlu/context-hud/discussions
+    about: Use GitHub Discussions for setup questions, usage help, and general conversation.
+  - name: Security reports
+    url: https://github.com/htahaozlu/context-hud/security/advisories/new
+    about: Report sensitive security issues privately through GitHub Security Advisories.
+

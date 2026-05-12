@@ -2,5 +2,6 @@
 target/
 .context-hud/
 dist/
+AGENT.md
 CLAUDE.md
 extension.wasm

@@ -1,0 +1,69 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos-release:
+    runs-on: macos-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Derive version
+        id: version
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+            TAG_NAME="${GITHUB_REF_NAME}"
+          else
+            VERSION="$(sed -n 's/^version = \"\\(.*\\)\"/\\1/p' Cargo.toml | head -n1)"
+            TAG_NAME="v${VERSION}"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag_name=${TAG_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Sync app bundle version
+        shell: bash
+        run: |
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${{ steps.version.outputs.version }}" packaging/macos/ContextHUD-Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ github.run_number }}" packaging/macos/ContextHUD-Info.plist
+
+      - name: Build DMG
+        shell: bash
+        run: scripts/create-macos-dmg.sh
+
+      - name: Generate checksums
+        shell: bash
+        run: shasum -a 256 dist/ContextHUD.dmg > dist/ContextHUD.dmg.sha256
+
+      - name: Prepare release notes
+        id: notes
+        shell: bash
+        run: |
+          NOTES_PATH="docs/releases/${{ steps.version.outputs.tag_name }}.md"
+          if [[ -f "$NOTES_PATH" ]]; then
+            echo "body_path=$NOTES_PATH" >> "$GITHUB_OUTPUT"
+          else
+            echo "body_path=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag_name }}
+          generate_release_notes: ${{ steps.notes.outputs.body_path == '' }}
+          body_path: ${{ steps.notes.outputs.body_path }}
+          draft: false
+          prerelease: false
+          files: |
+            dist/ContextHUD.dmg
+            dist/ContextHUD.dmg.sha256

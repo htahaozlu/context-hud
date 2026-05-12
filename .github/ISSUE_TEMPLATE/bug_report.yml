@@ -1,0 +1,74 @@
+name: Bug report
+description: Report a reproducible problem in ContextHUD
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Please provide a minimal, reproducible report with concrete environment details.
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Affected surface
+      options:
+        - CLI
+        - macOS app
+        - Zed extension
+        - Packaging / release
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: Describe the bug in one or two precise sentences.
+      placeholder: Running `context-hud hud` exits without writing `.context-hud/hud.md`.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: List exact steps that reproduce the issue.
+      placeholder: |
+        1. Install the CLI with `cargo install --path .`
+        2. Run `context-hud hud`
+        3. Observe...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include OS version, installation method, and relevant tool versions.
+      placeholder: |
+        - macOS:
+        - ContextHUD version:
+        - Rust version:
+        - Zed version:
+        - Claude Code / Codex context:
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Paste terminal output, stack traces, or screenshots if available.
+      render: shell
+

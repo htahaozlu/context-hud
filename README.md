@@ -1,50 +1,82 @@
 # ContextHUD
 
-<p align="left">
-  <a href="https://github.com/htahaozlu/context-hud/releases/latest">
-    <img alt="Latest release" src="https://img.shields.io/github/v/release/htahaozlu/context-hud?display_name=tag&label=version">
-  </a>
+<p align="center">
+  <strong>Local-first repository context and native macOS usage visibility for coding agents.</strong>
+</p>
+
+<p align="center">
+  ContextHUD keeps agents grounded in the repository they are working on, writes stable agent-readable briefs, and gives Claude Code and Codex usage a native macOS surface.
+</p>
+
+<p align="center">
   <a href="https://github.com/htahaozlu/context-hud/releases/latest/download/ContextHUD.dmg">
     <img alt="Download for macOS" src="https://img.shields.io/badge/Download-macOS%20DMG-black?logo=apple">
   </a>
+  <a href="https://github.com/htahaozlu/context-hud/releases/latest">
+    <img alt="Latest release" src="https://img.shields.io/github/v/release/htahaozlu/context-hud?display_name=tag&label=release">
+  </a>
+  <a href="LICENSE">
+    <img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-5DADE2">
+  </a>
+  <img alt="Platform" src="https://img.shields.io/badge/platform-macOS-7DCEA0">
 </p>
 
-ContextHUD keeps local coding agents grounded in the repository they are working on and gives you a native macOS view into Claude Code and Codex usage. It started as a Zed extension experiment, but the product is now broader: a reusable context engine, a CLI, agent-readable artifacts, and a menubar companion app.
+<table>
+  <tr>
+    <td valign="top" width="58%">
 
-## Why it exists
+### What it does
 
-Modern agent workflows lose state in two places:
+ContextHUD solves two persistent problems in agent-driven development:
 
-- the repository changes faster than the agent brief
-- token/session usage lives in terminal output and scattered local transcripts
+- repository context drifts faster than an agent brief can keep up
+- usage and session state stay buried in terminal output and local transcripts
 
-ContextHUD fixes both with a local-first pipeline:
+It addresses both through a local pipeline that continuously produces stable project summaries and a native macOS HUD for Claude Code and Codex activity.
 
-- repository context is refreshed into stable files under `.context-hud/`
-- agents can read the same concise brief every time through `AGENT.md` or `CLAUDE.md`
-- Claude Code and Codex usage is summarized into a native macOS window and a compact menubar HUD
+    </td>
+    <td valign="top" width="42%">
 
-## Highlights
+### Core surfaces
 
-- Local-first. No hosted service is required for repository summaries.
-- Persistent agent brief. Writes a stable `AGENT.md` plus `CLAUDE.md` compatibility output.
-- Useful time windows. Tracks `now`, `session`, and `week` repository views.
-- Native macOS companion. Menubar HUD plus a native AppKit usage window for Claude and Codex.
-- Structured artifacts. Emits both markdown and JSON so other tools can consume the same state.
+- Repository snapshots under `.context-hud/`
+- Stable `AGENT.md` and `CLAUDE.md`
+- CLI for refresh, watch, and global views
+- Native AppKit menubar companion
+- Markdown and JSON artifacts for tooling
 
-## Download for macOS
+    </td>
+  </tr>
+</table>
 
-1. Open the latest release from the button above.
-2. Download `ContextHUD.dmg`.
-3. Drag `ContextHUD.app` into `Applications`.
-4. Launch the app once from `Applications`.
-5. Eject and delete the DMG. It is not needed after installation.
+## Product Preview
 
-## Product surfaces
+Add a product screenshot here once exported from the app:
 
-### Repository context
+```md
+![ContextHUD screenshot](docs/images/context-hud-screenshot.png)
+```
 
-Each refresh writes agent-readable project state under `.context-hud/`:
+Recommended captures:
+
+- the menubar HUD open
+- the native usage window
+- a repository with generated `.context-hud/` artifacts visible
+
+## Why ContextHUD exists
+
+Modern coding agents need the same two things on every run:
+
+1. a concise, current repository brief
+2. a reliable view of recent usage and session behavior
+
+Most workflows handle these inconsistently. ContextHUD standardizes them with local artifact generation and a native desktop surface, without requiring a hosted backend for repository summaries.
+
+## Key capabilities
+
+### Repository context generation
+
+Each refresh writes agent-readable state into `.context-hud/`:
 
 - `state.json`
 - `brief-now.md`
@@ -53,36 +85,44 @@ Each refresh writes agent-readable project state under `.context-hud/`:
 - `AGENT.md`
 - `hud.md`
 
-`CLAUDE.md` is mirrored at the repository root for Claude Code compatibility.
+For Claude Code compatibility, `CLAUDE.md` is mirrored at the repository root.
 
-### CLI
+### CLI workflow
 
-The CLI is the reliable always-on surface today:
+The CLI is the most reliable always-on interface today:
 
 - `context-hud hud` refreshes the current repository and prints the HUD
 - `context-hud snapshot` writes artifacts without printing the HUD
-- `context-hud watch 30 .` keeps a repository fresh on an interval
+- `context-hud watch 30 .` keeps repository context fresh on an interval
 - `context-hud global` builds a cross-project HUD under `~/.context-hud/`
 
-### Native macOS app
+### Native macOS companion
 
-The companion app reads `~/.context-hud/hud.json` and shows:
+The optional companion app reads `~/.context-hud/hud.json` and provides:
 
 - a compact menubar status view
-- a native usage window for Claude and Codex
+- a native usage window for Claude Code and Codex
 - settings for theme, language, and menubar title composition
 
-The primary desktop UI is native AppKit. `detail.html` is only a standalone export artifact, not the main app experience.
+The desktop UI is native AppKit. `detail.html` is an export artifact, not the primary app experience.
 
 ## Installation
 
-### CLI
+### Install the CLI
 
 ```bash
 cargo install --path .
 ```
 
-### Zed dev extension
+### Install the macOS app
+
+1. Open the latest release.
+2. Download `ContextHUD.dmg`.
+3. Drag `ContextHUD.app` into `Applications`.
+4. Launch the app once from `Applications`.
+5. Eject and delete the DMG.
+
+### Install as a Zed dev extension
 
 1. Open the Extensions view in Zed.
 2. Choose `Install Dev Extension`.
@@ -97,13 +137,13 @@ cargo install --path .
 context-hud hud
 ```
 
-### Write all artifacts without printing the HUD
+### Write artifacts without printing the HUD
 
 ```bash
 context-hud snapshot
 ```
 
-### Keep repository artifacts fresh
+### Keep repository context fresh
 
 ```bash
 context-hud watch 30 .
@@ -116,11 +156,11 @@ context-hud global
 context-hud watch-global 30
 ```
 
-The global HUD is written to `~/.context-hud/hud.md`. Pin that file in Zed if you want a persistent cross-project tab.
+The global HUD is written to `~/.context-hud/hud.md`.
 
 ## Artifact layout
 
-Each refresh writes the following files:
+Each refresh writes the following files atomically:
 
 - `.context-hud/state.json`
 - `.context-hud/brief-now.md`
@@ -130,42 +170,40 @@ Each refresh writes the following files:
 - `.context-hud/hud.md`
 - `CLAUDE.md`
 
-Writes are atomic, so agents do not observe partial files mid-refresh.
+Atomic writes ensure agents do not observe partial state during refresh.
 
-## macOS app and DMG
+## Data sources
 
-The repository includes packaging scripts for the optional companion app:
+ContextHUD combines:
+
+- Git branch, recent commits, and worktree status
+- file activity inferred from repository mtimes
+- Claude Code usage from `~/.claude/projects/**/*.jsonl`
+- Codex CLI usage from `~/.codex/sessions/**/*.jsonl`
+
+No external service is required for the core repository summaries. Usage aggregation relies on locally available transcript data and `python3`.
+
+## Packaging
+
+The repository includes scripts for the optional macOS companion build:
 
 ```bash
 scripts/build-menubar-app.sh
 scripts/create-macos-dmg.sh
 ```
 
-This produces:
+Artifacts:
 
 - `dist/ContextHUD.app`
 - `dist/ContextHUD.dmg`
 
-The DMG includes a short install note that tells users to drag the app into `Applications`, launch it once, then eject and delete the DMG.
-
-## How the data is collected
-
-ContextHUD combines:
-
-- Git branch, recent commits, and worktree status
-- File activity inferred from repository mtimes
-- Claude Code usage from `~/.claude/projects/**/*.jsonl`
-- Codex CLI usage from `~/.codex/sessions/**/*.jsonl`
-
-No external service is required for the core repository summaries. Usage aggregation relies on locally available transcript data and `python3`.
-
 ## Current constraints
 
-- Zed `extension_api` `0.7` does not expose a load-time worktree hook.
-- Zed does not yet expose a persistent HUD primitive for extensions.
-- Agent auto-injection is file-based today; agents read `.context-hud/AGENT.md` or `CLAUDE.md`.
+- Zed `extension_api` `0.7` does not expose a load-time worktree hook
+- Zed does not yet expose a persistent HUD primitive for extensions
+- agent auto-injection is file-based today through `.context-hud/AGENT.md` or `CLAUDE.md`
 
-Because of those limits, the CLI is the most reliable always-on surface today.
+Because of those limits, the CLI remains the most dependable always-on surface.
 
 ## Repository layout
 
@@ -180,6 +218,13 @@ Because of those limits, the CLI is the most reliable always-on surface today.
 cargo check
 cargo run --example snapshot
 ```
+
+## Community
+
+- Questions and usage help: GitHub Discussions
+- Bugs and feature requests: GitHub Issues
+- Contribution guide: `CONTRIBUTING.md`
+- Security reporting: `SECURITY.md`
 
 ## License
 
