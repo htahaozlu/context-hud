@@ -1,6 +1,10 @@
 # ContextHUD
 
 <p align="center">
+  English | <a href="README.tr.md">Turkce</a>
+</p>
+
+<p align="center">
   <strong>Local-first repository context and native macOS usage visibility for coding agents.</strong>
 </p>
 
@@ -51,17 +55,11 @@ It addresses both through a local pipeline that continuously produces stable pro
 
 ## Product Preview
 
-Add a product screenshot here once exported from the app:
+<p align="center">
+  <img src="docs/images/context-hud-screenshot.png" alt="ContextHUD native usage window" width="100%">
+</p>
 
-```md
-![ContextHUD screenshot](docs/images/context-hud-screenshot.png)
-```
-
-Recommended captures:
-
-- the menubar HUD open
-- the native usage window
-- a repository with generated `.context-hud/` artifacts visible
+Native macOS usage window with rolling session visibility for Claude Code and Codex.
 
 ## Why ContextHUD exists
 
