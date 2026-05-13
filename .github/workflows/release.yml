@@ -48,7 +48,7 @@ jobs:
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" packaging/macos/ContextHUD-Info.plist
 
       - name: Import signing certificate
-        if: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 != '' }}
+        if: env.MACOS_CERTIFICATE_P12_BASE64 != ''
         shell: bash
         env:
           MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
@@ -76,7 +76,7 @@ jobs:
           echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
 
       - name: Store notarization credentials
-        if: ${{ secrets.MACOS_NOTARY_API_KEY_BASE64 != '' }}
+        if: env.MACOS_NOTARY_API_KEY_BASE64 != ''
         shell: bash
         env:
           MACOS_NOTARY_API_KEY_BASE64: ${{ secrets.MACOS_NOTARY_API_KEY_BASE64 }}
