@@ -254,15 +254,19 @@ struct AgentVisual {
     static func forName(_ name: String) -> Self {
         switch name.lowercased() {
         case "claude":
-            return .init(assetName: "anthropic", accessibilityLabel: "Claude")
+            return .init(assetName: "claude", accessibilityLabel: "Claude")
         case "codex":
-            return .init(assetName: "openai-blossom", accessibilityLabel: "Codex")
+            return .init(assetName: "codex", accessibilityLabel: "Codex")
         case "gemini":
-            return .init(assetName: "googlegemini", accessibilityLabel: "Gemini")
-        case "ollama":
-            return .init(assetName: "ollama", accessibilityLabel: "Ollama")
-        case "copilot cli":
-            return .init(assetName: "githubcopilot", accessibilityLabel: "Copilot CLI")
+            return .init(assetName: "gemini", accessibilityLabel: "Gemini")
+        case "copilot cli", "copilot":
+            return .init(assetName: "copilot", accessibilityLabel: "Copilot CLI")
+        case "deepseek":
+            return .init(assetName: "deepseek", accessibilityLabel: "DeepSeek")
+        case "qwen":
+            return .init(assetName: "qwen", accessibilityLabel: "Qwen")
+        case "minimax":
+            return .init(assetName: "minimax", accessibilityLabel: "MiniMax")
         default:
             return .init(assetName: nil, accessibilityLabel: name)
         }

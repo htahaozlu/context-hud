@@ -9,6 +9,7 @@ docs/sample-data/
 scripts/marketing-screenshot.sh
 __pycache__/
 *.pyc
+.DS_Store
 
 # Local IDE / agent state
 .claude/

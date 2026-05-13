@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, adapted for the current release workflow.
 
+## [0.1.9] - 2026-05-13
+
+### Changed
+
+- Brand icons now use dedicated agent CLI marks (Claude Code, Codex, Copilot, Gemini, DeepSeek, Qwen, MiniMax) instead of generic provider logos.
+
+### Removed
+
+- Dropped Ollama from the supported agent icon set and shell-history probe.
+
+### Added
+
+- Shell-history detection for DeepSeek, Qwen, and MiniMax CLIs.
+
 ## [0.1.8] - 2026-05-13
 
 ### Added
