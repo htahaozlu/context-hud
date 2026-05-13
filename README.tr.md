@@ -127,8 +127,14 @@ cargo install --path .
 1. Son surumu acin.
 2. `ContextHUD.dmg` dosyasini indirin.
 3. `ContextHUD.app` uygulamasini `Applications` klasorune surukleyin.
-4. Uygulamayi bir kez `Applications` icinden calistirin.
+4. Ilk acilis: `ContextHUD.app` uzerine sag tiklayin -> **Ac** -> tekrar **Ac**. Uygulama ad-hoc imzali (notarize degil), bu yuzden cift tiklamada "gelistirici dogrulanamadi" uyarisi cikar.
 5. DMG'yi cikarip silin.
+
+macOS uygulamayi "hasarli" olarak gosterirse, indirme bozulmus ya da imza dusmus demektir. DMG'yi yeniden indirin veya quarantine isaretini elle kaldirin:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/ContextHUD.app
+```
 
 ### Zed gelistirme eklentisi olarak kurulum
 

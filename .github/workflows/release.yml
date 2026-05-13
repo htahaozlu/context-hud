@@ -20,22 +20,77 @@ jobs:
       - name: Derive version
         id: version
         shell: bash
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
-          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
-            VERSION="${GITHUB_REF_NAME#v}"
-            TAG_NAME="${GITHUB_REF_NAME}"
+          if [[ "$REF_TYPE" == "tag" ]]; then
+            VERSION="${REF_NAME#v}"
+            TAG_NAME="$REF_NAME"
           else
-            VERSION="$(sed -n 's/^version = \"\\(.*\\)\"/\\1/p' Cargo.toml | head -n1)"
+            VERSION="$(sed -n 's/^version = \"\(.*\)\"/\1/p' Cargo.toml | head -n1)"
             TAG_NAME="v${VERSION}"
+          fi
+          if ! [[ "$VERSION" =~ ^[A-Za-z0-9._+-]+$ ]]; then
+            echo "Refusing unsafe version string: $VERSION" >&2
+            exit 1
           fi
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "tag_name=${TAG_NAME}" >> "$GITHUB_OUTPUT"
 
       - name: Sync app bundle version
         shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          BUILD_NUMBER: ${{ github.run_number }}
         run: |
-          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${{ steps.version.outputs.version }}" packaging/macos/ContextHUD-Info.plist
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ github.run_number }}" packaging/macos/ContextHUD-Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" packaging/macos/ContextHUD-Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" packaging/macos/ContextHUD-Info.plist
+
+      - name: Import signing certificate
+        if: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 != '' }}
+        shell: bash
+        env:
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN_PATH="$RUNNER_TEMP/release.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          P12_PATH="$RUNNER_TEMP/certificate.p12"
+
+          printf '%s' "$MACOS_CERTIFICATE_P12_BASE64" | base64 --decode > "$P12_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$P12_PATH" -k "$KEYCHAIN_PATH" -P "$MACOS_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          # Prepend the release keychain to the search list so codesign sees the identity.
+          OTHER_KEYCHAINS="$(security list-keychains -d user | sed -e 's/^[[:space:]]*//' -e 's/"//g')"
+          security list-keychains -d user -s "$KEYCHAIN_PATH" $OTHER_KEYCHAINS
+
+          rm -f "$P12_PATH"
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+
+      - name: Store notarization credentials
+        if: ${{ secrets.MACOS_NOTARY_API_KEY_BASE64 != '' }}
+        shell: bash
+        env:
+          MACOS_NOTARY_API_KEY_BASE64: ${{ secrets.MACOS_NOTARY_API_KEY_BASE64 }}
+          MACOS_NOTARY_API_KEY_ID: ${{ secrets.MACOS_NOTARY_API_KEY_ID }}
+          MACOS_NOTARY_API_ISSUER: ${{ secrets.MACOS_NOTARY_API_ISSUER }}
+        run: |
+          set -euo pipefail
+          P8_PATH="$RUNNER_TEMP/AuthKey.p8"
+          printf '%s' "$MACOS_NOTARY_API_KEY_BASE64" | base64 --decode > "$P8_PATH"
+          xcrun notarytool store-credentials contexthud-notary \
+            --key "$P8_PATH" \
+            --key-id "$MACOS_NOTARY_API_KEY_ID" \
+            --issuer "$MACOS_NOTARY_API_ISSUER"
+          rm -f "$P8_PATH"
 
       - name: Build DMG
         shell: bash
@@ -48,8 +103,10 @@ jobs:
       - name: Prepare release notes
         id: notes
         shell: bash
+        env:
+          TAG_NAME: ${{ steps.version.outputs.tag_name }}
         run: |
-          NOTES_PATH="docs/releases/${{ steps.version.outputs.tag_name }}.md"
+          NOTES_PATH="docs/releases/${TAG_NAME}.md"
           if [[ -f "$NOTES_PATH" ]]; then
             echo "body_path=$NOTES_PATH" >> "$GITHUB_OUTPUT"
           else
@@ -67,3 +124,9 @@ jobs:
           files: |
             dist/ContextHUD.dmg
             dist/ContextHUD.dmg.sha256
+
+      - name: Clean up release keychain
+        if: always() && env.KEYCHAIN_PATH != ''
+        shell: bash
+        run: |
+          security delete-keychain "$KEYCHAIN_PATH" || true

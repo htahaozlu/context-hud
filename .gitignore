@@ -9,3 +9,13 @@ docs/sample-data/
 scripts/marketing-screenshot.sh
 __pycache__/
 *.pyc
+
+# Local IDE / agent state
+.claude/
+
+# Apple notarization secrets — never commit
+AuthKey_*.p8
+*.cer
+*.certSigningRequest
+*.p12
+.notary-env

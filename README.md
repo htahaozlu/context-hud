@@ -119,8 +119,14 @@ cargo install --path .
 1. Open the latest release.
 2. Download `ContextHUD.dmg`.
 3. Drag `ContextHUD.app` into `Applications`.
-4. Launch the app once from `Applications`.
+4. First launch: right-click `ContextHUD.app` → **Open** → **Open** again. The app is ad-hoc signed (not notarized), so a standard double-click shows an "unidentified developer" warning.
 5. Eject and delete the DMG.
+
+If macOS reports the app as "damaged" instead of unidentified, the download was corrupted or stripped of its signature. Re-download the DMG, or remove quarantine manually:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/ContextHUD.app
+```
 
 ### Install as a Zed dev extension
 
