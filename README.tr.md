@@ -125,7 +125,7 @@ cargo install --path .
 ### macOS uygulamasi kurulumu
 
 1. Son surumu acin.
-2. `ContextHUD.dmg` dosyasini indirin.
+2. `ContextHUD.dmg` dosyasini indirin (evrensel: Apple Silicon + Intel).
 3. `ContextHUD.app` uygulamasini `Applications` klasorune surukleyin.
 4. Ilk acilis: `ContextHUD.app` uzerine sag tiklayin -> **Ac** -> tekrar **Ac**. Uygulama ad-hoc imzali (notarize degil), bu yuzden cift tiklamada "gelistirici dogrulanamadi" uyarisi cikar.
 5. DMG'yi cikarip silin.

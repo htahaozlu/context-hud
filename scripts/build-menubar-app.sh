@@ -23,7 +23,14 @@ fi
 rm -rf "$APP_DIR"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 
-xcrun --sdk macosx swiftc -O "$SWIFT_SRC" -o "$EXECUTABLE"
+EXECUTABLE_ARM64="$EXECUTABLE.arm64"
+EXECUTABLE_X86_64="$EXECUTABLE.x86_64"
+MIN_MACOS="${MACOSX_DEPLOYMENT_TARGET:-13.0}"
+xcrun --sdk macosx swiftc -O -target "arm64-apple-macos${MIN_MACOS}" "$SWIFT_SRC" -o "$EXECUTABLE_ARM64"
+xcrun --sdk macosx swiftc -O -target "x86_64-apple-macos${MIN_MACOS}" "$SWIFT_SRC" -o "$EXECUTABLE_X86_64"
+lipo -create "$EXECUTABLE_ARM64" "$EXECUTABLE_X86_64" -output "$EXECUTABLE"
+rm -f "$EXECUTABLE_ARM64" "$EXECUTABLE_X86_64"
+lipo -info "$EXECUTABLE"
 cp "$PLIST_SRC" "$CONTENTS_DIR/Info.plist"
 if [[ -f "$LOGO_SRC" ]]; then
   cp "$LOGO_SRC" "$RESOURCES_DIR/logo.png"

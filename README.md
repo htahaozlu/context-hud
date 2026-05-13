@@ -117,7 +117,7 @@ cargo install --path .
 ### Install the macOS app
 
 1. Open the latest release.
-2. Download `ContextHUD.dmg`.
+2. Download `ContextHUD.dmg` (universal: Apple Silicon + Intel).
 3. Drag `ContextHUD.app` into `Applications`.
 4. First launch: right-click `ContextHUD.app` → **Open** → **Open** again. The app is ad-hoc signed (not notarized), so a standard double-click shows an "unidentified developer" warning.
 5. Eject and delete the DMG.
