@@ -880,11 +880,13 @@ _HISTORY_TOOLS = [
     ("sgpt", "ShellGPT"),
     ("mods", "Mods"),
     ("fabric", "Fabric"),
-    ("ollama", "Ollama"),
     ("tgpt", "tGPT"),
     ("continue", "Continue"),
     ("copilot", "Copilot CLI"),
     ("gemini", "Gemini"),
+    ("deepseek", "DeepSeek"),
+    ("qwen", "Qwen"),
+    ("minimax", "MiniMax"),
 ]
 
 
