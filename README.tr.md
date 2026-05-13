@@ -125,11 +125,10 @@ cargo install --path .
 ### Homebrew ile kurulum (macOS)
 
 ```bash
-brew tap htahaozlu/context-hud https://github.com/htahaozlu/context-hud.git
-brew install --cask context-hud
+brew install --cask htahaozlu/context-hud/context-hud
 ```
 
-Sonraki guncellemeler: `brew upgrade --cask context-hud`.
+`brew` ilk kurulumda `htahaozlu/homebrew-context-hud` tap'ini otomatik ekler. Sonraki guncellemeler: `brew upgrade --cask context-hud`.
 
 ### macOS uygulamasini elle kurma
 

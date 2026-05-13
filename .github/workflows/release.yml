@@ -125,7 +125,7 @@ jobs:
             dist/ContextHUD.dmg
             dist/ContextHUD.dmg.sha256
 
-      - name: Update Homebrew Cask
+      - name: Update Homebrew Cask (in-repo)
         if: github.ref_type == 'tag'
         shell: bash
         env:
@@ -145,10 +145,37 @@ jobs:
           rm -f "$CASK.bak"
           git add "$CASK"
           if git diff --cached --quiet; then
-            echo "Cask already up-to-date."
+            echo "In-repo cask already up-to-date."
           else
             git commit -m "chore(cask): bump to v${VERSION}"
             git push "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" HEAD:main
+          fi
+
+      - name: Sync tap repo (htahaozlu/homebrew-context-hud)
+        if: github.ref_type == 'tag' && env.HOMEBREW_TAP_TOKEN != ''
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          SHA=$(awk '{print $1}' dist/ContextHUD.dmg.sha256)
+          WORK=$(mktemp -d)
+          git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/htahaozlu/homebrew-context-hud.git" "$WORK"
+          cd "$WORK"
+          mkdir -p Casks
+          cp "$GITHUB_WORKSPACE/Casks/context-hud.rb" Casks/context-hud.rb
+          sed -i.bak -E "s/^  version \".*\"/  version \"${VERSION}\"/" Casks/context-hud.rb
+          sed -i.bak -E "s/^  sha256 \".*\"/  sha256 \"${SHA}\"/" Casks/context-hud.rb
+          rm -f Casks/context-hud.rb.bak
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Casks/context-hud.rb
+          if git diff --cached --quiet; then
+            echo "Tap cask already up-to-date."
+          else
+            git commit -m "chore: bump context-hud to v${VERSION}"
+            git push origin HEAD:main
           fi
 
       - name: Clean up release keychain

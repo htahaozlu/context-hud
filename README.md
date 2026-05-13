@@ -117,11 +117,10 @@ cargo install --path .
 ### Install via Homebrew (macOS)
 
 ```bash
-brew tap htahaozlu/context-hud https://github.com/htahaozlu/context-hud.git
-brew install --cask context-hud
+brew install --cask htahaozlu/context-hud/context-hud
 ```
 
-Upgrade later with `brew upgrade --cask context-hud`.
+`brew` auto-taps `htahaozlu/homebrew-context-hud` on first install. Upgrade later with `brew upgrade --cask context-hud`.
 
 ### Install the macOS app manually
 
