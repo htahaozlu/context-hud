@@ -29,7 +29,7 @@
 
 <p align="center">
   <a href="https://github.com/htahaozlu/context-hud/releases/latest">
-    <img alt="Latest release" src="https://img.shields.io/badge/release-v0.1.3-2F81F7">
+    <img alt="Latest release" src="https://img.shields.io/badge/release-v0.1.4-2F81F7">
   </a>
   <a href="LICENSE">
     <img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-5DADE2">
