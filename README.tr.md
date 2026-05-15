@@ -79,7 +79,7 @@ Claude Code ve Codex için sürekli oturum görünürlüğüne sahip yerel macOS
   <img src="docs/images/context-hud-menubar.png" alt="ContextHUD menubar" width="400">
 </p>
 
-Aktif ajan, proje ve bağlam kullanımını gösteren kompakt menubar durum öğesi.
+Aktif ajan, proje ve bağlam kullanımını gösteren kompakt menubar durum öğesi. Tıklandığında aktif oturum, bağlam penceresi, 5sa/7g limitleri, paralel oturumlar ve canlı tema seçici içeren yerel bir popover açılır.
 
 ## Ne işe yarar
 
@@ -124,11 +124,17 @@ Claude Code uyumluluğu için `CLAUDE.md`, depo köküne de aynalanır.
 
 Yardımcı uygulama `~/.context-hud/hud.json` dosyasını okur ve şunları sağlar:
 
-- kompakt bir menubar durum görünümü
-- Claude Code ve Codex için yerel kullanım penceresi
-- tema, dil ve menubar başlık birleşimi ayarları
+- kompakt menubar durum öğesi (aktif ajan + proje + bağlam %)
+- modern AppKit popover: aktif ajan, bağlam penceresi, ilerleme barlı 5sa/7g
+  limitleri, paralel oturumlar ve tespit edilen diğer AI araçları için kartlar
+- inline renk swatch'leri ve canlı önizlemeli tema seçici — bir temanın
+  üzerinde gezinirken menubar başlığı o paletle yeniden çizilir
+- Kullanım, Görünüm, Menubar ve Hakkında sekmeleri olan tam Ayarlar penceresi
+- paralel Claude / Codex oturumları için per-session bağlam yüzdesi
 
-Masaüstü arayüzü yerel AppKit ile yazılmıştır. `detail.html`, ana deneyim değil, bir export artifact'idir.
+Masaüstü arayüzü yerel AppKit'tir (NSPopover + NSVisualEffectView, sürekli
+köşe eğrileri, SF Symbol toolbar). `detail.html`, ana deneyim değil, bir
+export artifact'idir.
 
 ## Kullanım
 

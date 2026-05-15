@@ -296,7 +296,11 @@ private func agentInlineString(
         let side = max(12, round(font.capHeight * iconScale))
         icon.size = NSSize(width: side, height: side)
         attachment.attachmentCell = NSTextAttachmentCell(imageCell: icon)
-        attachment.bounds = NSRect(x: 0, y: round((font.capHeight - side) / 2) - 1, width: side, height: side)
+        // Center icon optically on the lowercase x-height with a small extra
+        // downward nudge — empirically the menubar status bar renders inline
+        // text-attachment images one row higher than the visual midpoint
+        // without this correction.
+        attachment.bounds = NSRect(x: 0, y: round((font.xHeight - side) / 2 - 1), width: side, height: side)
         return NSAttributedString(attachment: attachment)
     }
     return NSAttributedString(
@@ -328,6 +332,7 @@ struct ActiveSession {
     let model: String?
     let lastTurn: Date?
     let started: Date?
+    let ctxPct: Double?
 }
 
 struct Agent {
@@ -434,7 +439,8 @@ final class Hud {
                 project: (obj["project"] as? String) ?? "—",
                 model: obj["model"] as? String,
                 lastTurn: last,
-                started: st
+                started: st,
+                ctxPct: obj["context_pct"] as? Double
             )
         }
 
@@ -499,7 +505,12 @@ final class Hud {
         if m < 60 { return "\(m)m" }
         let h = m / 60
         let mm = m % 60
-        return mm == 0 ? "\(h)h" : "\(h)h \(mm)m"
+        if h < 24 {
+            return mm == 0 ? "\(h)h" : "\(h)h \(mm)m"
+        }
+        let d = h / 24
+        let hh = h % 24
+        return hh == 0 ? "\(d)d" : "\(d)d \(hh)h"
     }
 
     static func formatTokens(_ value: UInt64) -> String {
@@ -2040,9 +2051,9 @@ final class PreferenceSectionCard: NSView {
         wantsLayer = true
         layer?.cornerRadius = 12
         layer?.cornerCurve = .continuous
-        layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.6).cgColor
-        layer?.borderWidth = 0
+        layer?.borderWidth = 0.5
         translatesAutoresizingMaskIntoConstraints = false
+        updateColors()
 
         content.translatesAutoresizingMaskIntoConstraints = false
         addSubview(content)
@@ -2054,6 +2065,19 @@ final class PreferenceSectionCard: NSView {
         ])
     }
     required init?(coder: NSCoder) { fatalError() }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateColors()
+    }
+
+    private func updateColors() {
+        let isDark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        layer?.backgroundColor = (isDark
+            ? NSColor.white.withAlphaComponent(0.05)
+            : NSColor.black.withAlphaComponent(0.04)).cgColor
+        layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.25).cgColor
+    }
 }
 
 class PreferencePaneViewController: NSViewController {
@@ -2067,7 +2091,7 @@ class PreferencePaneViewController: NSViewController {
 
         scrollView.drawsBackground = false
         scrollView.hasVerticalScroller = true
-        scrollView.contentInsets = NSEdgeInsets(top: 12, left: 0, bottom: 0, right: 0)
+        scrollView.contentInsets = NSEdgeInsets(top: 8, left: 0, bottom: 0, right: 0)
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(scrollView)
 
@@ -2077,7 +2101,7 @@ class PreferencePaneViewController: NSViewController {
 
         contentStack.orientation = .vertical
         contentStack.alignment = .leading
-        contentStack.spacing = 22
+        contentStack.spacing = 18
         contentStack.translatesAutoresizingMaskIntoConstraints = false
         documentView.addSubview(contentStack)
 
@@ -2087,10 +2111,10 @@ class PreferencePaneViewController: NSViewController {
             scrollView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
             documentView.widthAnchor.constraint(equalTo: scrollView.widthAnchor),
-            contentStack.topAnchor.constraint(equalTo: documentView.topAnchor, constant: 24),
-            contentStack.leadingAnchor.constraint(equalTo: documentView.leadingAnchor, constant: 28),
-            contentStack.trailingAnchor.constraint(equalTo: documentView.trailingAnchor, constant: -28),
-            contentStack.bottomAnchor.constraint(equalTo: documentView.bottomAnchor, constant: -28),
+            contentStack.topAnchor.constraint(equalTo: documentView.topAnchor, constant: 20),
+            contentStack.leadingAnchor.constraint(equalTo: documentView.leadingAnchor, constant: 24),
+            contentStack.trailingAnchor.constraint(equalTo: documentView.trailingAnchor, constant: -24),
+            contentStack.bottomAnchor.constraint(equalTo: documentView.bottomAnchor, constant: -24),
         ])
     }
 
@@ -2107,20 +2131,33 @@ class PreferencePaneViewController: NSViewController {
         section.spacing = 4
         section.translatesAutoresizingMaskIntoConstraints = false
 
-        let titleLabel = NSTextField(labelWithString: title)
-        titleLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
-        titleLabel.textColor = .labelColor
+        // Sonoma System Settings-style uppercase section header — small,
+        // medium weight, secondary color — keeps the focus on the card body.
+        let titleLabel = NSTextField(labelWithString: title.uppercased())
+        titleLabel.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
+        titleLabel.textColor = .secondaryLabelColor
+        let para = NSMutableParagraphStyle()
+        para.maximumLineHeight = 14
+        titleLabel.attributedStringValue = NSAttributedString(
+            string: title.uppercased(),
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+                .foregroundColor: NSColor.secondaryLabelColor,
+                .kern: 0.6,
+                .paragraphStyle: para,
+            ]
+        )
         section.addArrangedSubview(titleLabel)
 
         if let subtitle, !subtitle.isEmpty {
             let subtitleLabel = NSTextField(wrappingLabelWithString: subtitle)
             subtitleLabel.font = NSFont.systemFont(ofSize: 11)
-            subtitleLabel.textColor = .secondaryLabelColor
+            subtitleLabel.textColor = .tertiaryLabelColor
             subtitleLabel.maximumNumberOfLines = 0
             section.addArrangedSubview(subtitleLabel)
-            section.setCustomSpacing(10, after: subtitleLabel)
+            section.setCustomSpacing(8, after: subtitleLabel)
         } else {
-            section.setCustomSpacing(8, after: titleLabel)
+            section.setCustomSpacing(6, after: titleLabel)
         }
 
         let card = PreferenceSectionCard(content: body)
@@ -2381,6 +2418,785 @@ final class AboutViewController: PreferencePaneViewController {
     }
 }
 
+// MARK: - Modern menubar popover
+//
+// Replaces the legacy NSMenu dropdown. Renders a native popover with a
+// vibrant material background, hero card for the active agent, a context
+// window meter, a 3-tile stat grid (5h / 7d / session), an optional list of
+// other AI tools, and a footer toolbar (theme / settings / refresh / quit).
+// Designed for macOS 13+ — uses NSVisualEffectView (.menu), continuous
+// corner curves, and SF Symbol toolbar icons.
+
+/// Rounded card backdrop tuned for use over an NSVisualEffectView. Slightly
+/// translucent fill plus a hairline border so it reads on both light and
+/// dark menubar materials without competing with the vibrancy underneath.
+final class MenubarCardView: NSView {
+    init() {
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.cornerRadius = 12
+        layer?.cornerCurve = .continuous
+        layer?.borderWidth = 0.5
+        translatesAutoresizingMaskIntoConstraints = false
+        updateColors()
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateColors()
+    }
+
+    private func updateColors() {
+        let isDark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        layer?.backgroundColor = (isDark
+            ? NSColor.white.withAlphaComponent(0.05)
+            : NSColor.black.withAlphaComponent(0.04)).cgColor
+        layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.25).cgColor
+    }
+}
+
+/// Compact stat tile used inside the 3-column grid. Caption sits above a
+/// large monospaced value, with an optional faded sub-line for context like
+/// "resets in 2h".
+final class CompactStatView: NSView {
+    init(caption: String, value: String, valueColor: NSColor, sub: String? = nil) {
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.cornerRadius = 10
+        layer?.cornerCurve = .continuous
+        layer?.borderWidth = 0.5
+        translatesAutoresizingMaskIntoConstraints = false
+        updateColors()
+
+        let cap = NSTextField(labelWithString: caption.uppercased())
+        cap.font = NSFont.systemFont(ofSize: 9, weight: .semibold)
+        cap.textColor = .tertiaryLabelColor
+        cap.translatesAutoresizingMaskIntoConstraints = false
+
+        let val = NSTextField(labelWithString: value)
+        val.font = NSFont.monospacedSystemFont(ofSize: 17, weight: .semibold)
+        val.textColor = valueColor
+        val.lineBreakMode = .byTruncatingTail
+        val.translatesAutoresizingMaskIntoConstraints = false
+
+        addSubview(cap); addSubview(val)
+        let padH: CGFloat = 12
+        let padV: CGFloat = 10
+        var constraints: [NSLayoutConstraint] = [
+            cap.topAnchor.constraint(equalTo: topAnchor, constant: padV),
+            cap.leadingAnchor.constraint(equalTo: leadingAnchor, constant: padH),
+            cap.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -padH),
+            val.topAnchor.constraint(equalTo: cap.bottomAnchor, constant: 4),
+            val.leadingAnchor.constraint(equalTo: leadingAnchor, constant: padH),
+            val.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -padH),
+        ]
+        if let sub {
+            let sublbl = NSTextField(labelWithString: sub)
+            sublbl.font = NSFont.systemFont(ofSize: 10)
+            sublbl.textColor = .secondaryLabelColor
+            sublbl.lineBreakMode = .byTruncatingTail
+            sublbl.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(sublbl)
+            constraints.append(contentsOf: [
+                sublbl.topAnchor.constraint(equalTo: val.bottomAnchor, constant: 3),
+                sublbl.leadingAnchor.constraint(equalTo: leadingAnchor, constant: padH),
+                sublbl.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -padH),
+                sublbl.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -padV),
+                heightAnchor.constraint(equalToConstant: 80),
+            ])
+        } else {
+            constraints.append(contentsOf: [
+                val.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -padV),
+                heightAnchor.constraint(equalToConstant: 64),
+            ])
+        }
+        NSLayoutConstraint.activate(constraints)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateColors()
+    }
+
+    private func updateColors() {
+        layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.4).cgColor
+        layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.3).cgColor
+    }
+}
+
+/// Pulsing activity indicator dot. Animates while the agent is considered
+/// "live" (has fired a turn in the recent window).
+final class ActivityDotView: NSView {
+    var isActive: Bool = false { didSet { restartIfNeeded() } }
+    override var intrinsicContentSize: NSSize { NSSize(width: 10, height: 10) }
+
+    init() {
+        super.init(frame: .zero)
+        wantsLayer = true
+        translatesAutoresizingMaskIntoConstraints = false
+        layer?.cornerRadius = 5
+        updateAppearance()
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateAppearance()
+    }
+
+    private func updateAppearance() {
+        let color: NSColor = isActive ? .systemGreen : .tertiaryLabelColor
+        layer?.backgroundColor = color.cgColor
+    }
+
+    private func restartIfNeeded() {
+        updateAppearance()
+        guard let layer = self.layer else { return }
+        layer.removeAnimation(forKey: "pulse")
+        guard isActive else { return }
+        let anim = CABasicAnimation(keyPath: "opacity")
+        anim.fromValue = 1.0
+        anim.toValue = 0.35
+        anim.duration = 1.1
+        anim.autoreverses = true
+        anim.repeatCount = .infinity
+        anim.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        layer.add(anim, forKey: "pulse")
+    }
+}
+
+/// Borderless square toolbar button used in the popover footer. Renders an
+/// SF Symbol over a hover-highlighted rounded background.
+final class FooterIconButton: NSButton {
+    private var hovering = false { didSet { needsDisplay = true } }
+    private var trackingArea: NSTrackingArea?
+
+    init(symbol: String, tooltip: String, target: AnyObject?, action: Selector) {
+        super.init(frame: .zero)
+        self.target = target
+        self.action = action
+        self.toolTip = tooltip
+        self.isBordered = false
+        self.bezelStyle = .regularSquare
+        self.title = ""
+        self.imagePosition = .imageOnly
+        self.wantsLayer = true
+        self.layer?.cornerRadius = 7
+        self.layer?.cornerCurve = .continuous
+        let cfg = NSImage.SymbolConfiguration(pointSize: 14, weight: .medium)
+        if let img = NSImage(systemSymbolName: symbol, accessibilityDescription: tooltip)?
+            .withSymbolConfiguration(cfg) {
+            self.image = img
+        }
+        self.contentTintColor = .secondaryLabelColor
+        self.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            self.widthAnchor.constraint(equalToConstant: 30),
+            self.heightAnchor.constraint(equalToConstant: 28),
+        ])
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea { removeTrackingArea(trackingArea) }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeInActiveApp],
+            owner: self
+        )
+        addTrackingArea(area)
+        trackingArea = area
+    }
+    override func mouseEntered(with event: NSEvent) { hovering = true }
+    override func mouseExited(with event: NSEvent) { hovering = false }
+
+    override func draw(_ dirtyRect: NSRect) {
+        if hovering {
+            NSColor.labelColor.withAlphaComponent(0.08).setFill()
+            NSBezierPath(roundedRect: bounds, xRadius: 7, yRadius: 7).fill()
+        }
+        super.draw(dirtyRect)
+    }
+}
+
+/// Single-row entry used for the "Other tools" list inside the popover.
+/// Brand icon (left) + tool name + usage stats line (right column).
+final class OtherToolRowView: NSView {
+    init(tool: ToolSummary) {
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+
+        let nameLbl = agentInlineLabel(
+            name: tool.name,
+            font: NSFont.systemFont(ofSize: 12, weight: .medium),
+            color: .labelColor,
+            iconScale: 1.0
+        )
+        nameLbl.translatesAutoresizingMaskIntoConstraints = false
+        nameLbl.toolTip = tool.name
+
+        var parts: [String] = []
+        if tool.tokens7d > 0 { parts.append(Hud.formatTokens(tool.tokens7d)) }
+        if tool.sessions7d > 0 { parts.append("\(tool.sessions7d)×/\(L10n.text("wk", "hf"))") }
+        if let m = tool.lastModel { parts.append(m) }
+        let info = NSTextField(labelWithString: parts.joined(separator: " · "))
+        info.font = NSFont.monospacedSystemFont(ofSize: 10.5, weight: .regular)
+        info.textColor = .secondaryLabelColor
+        info.alignment = .right
+        info.lineBreakMode = .byTruncatingTail
+        info.translatesAutoresizingMaskIntoConstraints = false
+
+        addSubview(nameLbl); addSubview(info)
+        NSLayoutConstraint.activate([
+            nameLbl.leadingAnchor.constraint(equalTo: leadingAnchor),
+            nameLbl.centerYAnchor.constraint(equalTo: centerYAnchor),
+            info.trailingAnchor.constraint(equalTo: trailingAnchor),
+            info.centerYAnchor.constraint(equalTo: centerYAnchor),
+            info.leadingAnchor.constraint(greaterThanOrEqualTo: nameLbl.trailingAnchor, constant: 8),
+            heightAnchor.constraint(equalToConstant: 22),
+        ])
+    }
+    required init?(coder: NSCoder) { fatalError() }
+}
+
+/// Popover content view controller. Card-based layout — each section is a
+/// rounded card laid out in a single vertical stack with NSStackView's
+/// .width alignment so every card spans the full content width (minus
+/// stack edge insets) regardless of its intrinsic content. Rebuilt on
+/// every show so the panel reflects the most recent hud.json.
+final class MenubarPopoverViewController: NSViewController, NSMenuDelegate {
+    static let contentWidth: CGFloat = 360
+    private let hPad: CGFloat = 14
+    private let vGap: CGFloat = 10
+
+    var onOpenSettings: (() -> Void)?
+    var onRefresh: (() -> Void)?
+    var onQuit: (() -> Void)?
+    var onPickTheme: ((String) -> Void)?
+    /// Called while the user hovers theme menu items. Passes the hovered
+    /// theme id (or nil to clear the preview). The host (AppDelegate) uses
+    /// this to repaint the menubar title in the theme's colors live, without
+    /// persisting the choice until the menu item is actually selected.
+    var onPreviewTheme: ((String?) -> Void)?
+
+    private let visualEffect = NSVisualEffectView()
+    private let contentStack = NSStackView()
+
+    override func loadView() {
+        let root = NSView()
+        root.translatesAutoresizingMaskIntoConstraints = false
+        root.wantsLayer = true
+
+        visualEffect.material = .menu
+        visualEffect.blendingMode = .behindWindow
+        visualEffect.state = .active
+        visualEffect.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(visualEffect)
+
+        contentStack.orientation = .vertical
+        contentStack.alignment = .leading
+        contentStack.spacing = 8
+        contentStack.edgeInsets = NSEdgeInsets(top: 16, left: 0, bottom: 14, right: 0)
+        contentStack.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(contentStack)
+
+        NSLayoutConstraint.activate([
+            visualEffect.topAnchor.constraint(equalTo: root.topAnchor),
+            visualEffect.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            visualEffect.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            visualEffect.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            contentStack.topAnchor.constraint(equalTo: root.topAnchor),
+            contentStack.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            contentStack.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            contentStack.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            root.widthAnchor.constraint(equalToConstant: Self.contentWidth),
+        ])
+        view = root
+    }
+
+    func rebuild() {
+        contentStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+
+        let hud = Hud()
+        let (active, all, others) = hud.load()
+        let primary = active ?? all.first
+
+        if let agent = primary {
+            addCard(buildHero(agent: agent, isActive: agent.name == active?.name))
+            if let pct = agent.ctxPct {
+                addCard(buildContextMeter(agent: agent, pct: pct))
+            }
+            addCard(buildStatRow(agent: agent))
+            if agent.activeSessions.count > 1 {
+                addCard(buildConcurrentSessions(agent: agent))
+            }
+        } else {
+            addCard(buildEmptyState())
+        }
+        if !others.isEmpty {
+            addCard(buildOthers(tools: others))
+        }
+        addCard(buildFooter())
+    }
+
+    /// Adds a section view to the popover stack and pins both leading and
+    /// trailing edges to the stack — without this, NSStackView's `.leading`
+    /// alignment only pins one edge and views with narrow intrinsic content
+    /// (e.g. a card with a single short row) shrink instead of filling the
+    /// full popover width.
+    private func addCard(_ v: NSView) {
+        v.translatesAutoresizingMaskIntoConstraints = false
+        contentStack.addArrangedSubview(v)
+        NSLayoutConstraint.activate([
+            v.leadingAnchor.constraint(equalTo: contentStack.leadingAnchor, constant: 16),
+            v.trailingAnchor.constraint(equalTo: contentStack.trailingAnchor, constant: -16),
+        ])
+    }
+
+    // MARK: - Sections
+
+    /// Returns a (card, contentStack) pair. The content stack is constrained
+    /// inside the card with consistent 14h/12v padding. Callers add content to
+    /// the stack and the card auto-sizes its height while filling the popover
+    /// width via the parent contentStack's `.width` alignment.
+    private func sectionContainer() -> (NSView, NSStackView) {
+        let card = MenubarCardView()
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .width
+        stack.spacing = 4
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: card.topAnchor, constant: 14),
+            stack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 16),
+            stack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -16),
+            stack.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -14),
+        ])
+        return (card, stack)
+    }
+
+    private func buildEmptyState() -> NSView {
+        let (container, stack) = sectionContainer()
+        let title = NSTextField(labelWithString: L10n.text("No agent data yet", "Henüz ajan verisi yok"))
+        title.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        title.textColor = .labelColor
+        let sub = NSTextField(wrappingLabelWithString: L10n.text(
+            "Start a Claude or Codex session to see context and limits here.",
+            "Bağlam ve limitleri görmek için Claude veya Codex oturumu başlatın."
+        ))
+        sub.font = NSFont.systemFont(ofSize: 11)
+        sub.textColor = .secondaryLabelColor
+        sub.maximumNumberOfLines = 0
+        sub.preferredMaxLayoutWidth = Self.contentWidth - 2 * hPad
+        stack.addArrangedSubview(title)
+        stack.addArrangedSubview(sub)
+        sub.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        return container
+    }
+
+    private func buildHero(agent a: Agent, isActive: Bool) -> NSView {
+        let (container, stack) = sectionContainer()
+        stack.spacing = 2
+
+        let dot = ActivityDotView()
+        dot.isActive = isActive
+
+        let nameLbl = agentInlineLabel(
+            name: a.name,
+            font: NSFont.systemFont(ofSize: 16, weight: .semibold),
+            color: .labelColor,
+            iconScale: 1.3
+        )
+        nameLbl.toolTip = a.name
+
+        let titleRow = NSStackView(views: [dot, nameLbl])
+        titleRow.orientation = .horizontal
+        titleRow.alignment = .centerY
+        titleRow.spacing = 8
+
+        var metaParts: [String] = []
+        if let m = a.model { metaParts.append(m) }
+        metaParts.append(a.project)
+        if let t = a.lastTurn { metaParts.append(Hud.relative(t)) }
+        let duration = Hud.formatDuration(a.sessionStarted, a.lastTurn)
+        if duration != "—" {
+            metaParts.append(L10n.text("\(duration) running", "\(duration)"))
+        }
+        let meta = NSTextField(labelWithString: metaParts.joined(separator: "  ·  "))
+        meta.font = NSFont.systemFont(ofSize: 11)
+        meta.textColor = .secondaryLabelColor
+        meta.lineBreakMode = .byTruncatingMiddle
+
+        stack.addArrangedSubview(titleRow)
+        stack.addArrangedSubview(meta)
+        return container
+    }
+
+    private func buildContextMeter(agent a: Agent, pct: Double) -> NSView {
+        let (container, stack) = sectionContainer()
+        stack.spacing = 6
+
+        let label = NSTextField(labelWithString: L10n.text("Context", "Bağlam"))
+        label.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        label.textColor = .secondaryLabelColor
+
+        let pctStr = String(format: "%.0f%%", pct)
+        let pctLbl = NSTextField(labelWithString: pctStr)
+        pctLbl.font = NSFont.monospacedSystemFont(ofSize: 13, weight: .semibold)
+        pctLbl.textColor = Hud.ctxColor(pct)
+
+        let used = a.activeSession
+        let detailText = a.ctxWindow.map { w in
+            "\(Hud.formatTokens(used)) / \(Hud.formatTokens(w))"
+        } ?? Hud.formatTokens(used)
+        let detail = NSTextField(labelWithString: detailText)
+        detail.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+        detail.textColor = .tertiaryLabelColor
+        detail.alignment = .right
+
+        let spacer = NSView()
+        spacer.translatesAutoresizingMaskIntoConstraints = false
+        spacer.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+        let headerRow = NSStackView(views: [label, spacer, pctLbl, detail])
+        headerRow.orientation = .horizontal
+        headerRow.alignment = .firstBaseline
+        headerRow.distribution = .fill
+        headerRow.spacing = 6
+
+        let bar = ProgressBarView()
+        bar.value = max(0, min(1, pct / 100.0))
+        bar.tint = Hud.ctxColor(pct)
+        bar.corner = 2.5
+        bar.translatesAutoresizingMaskIntoConstraints = false
+
+        stack.addArrangedSubview(headerRow)
+        stack.addArrangedSubview(bar)
+        headerRow.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        bar.heightAnchor.constraint(equalToConstant: 5).isActive = true
+        bar.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        return container
+    }
+
+    private func buildStatRow(agent a: Agent) -> NSView {
+        let (container, stack) = sectionContainer()
+        stack.spacing = 10
+
+        var rows: [NSView] = []
+        if a.session5hPercent != nil || a.session5h > 0 {
+            rows.append(makeLimitRow(
+                label: L10n.text("5h limit", "5sa limit"),
+                percent: a.session5hPercent,
+                fallbackValue: Hud.formatTokens(a.session5h),
+                resetsAt: a.session5hResetsAt
+            ))
+        }
+        if a.week7dPercent != nil || a.week7d > 0 {
+            rows.append(makeLimitRow(
+                label: L10n.text("7d limit", "7g limit"),
+                percent: a.week7dPercent,
+                fallbackValue: Hud.formatTokens(a.week7d),
+                resetsAt: a.week7dResetsAt
+            ))
+        }
+        rows.append(makeSimpleStatRow(
+            label: L10n.text("Session total", "Oturum toplam"),
+            value: Hud.formatTokens(a.activeSession),
+            valueColor: .secondaryLabelColor
+        ))
+
+        for row in rows {
+            stack.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        }
+        return container
+    }
+
+    /// Limit row with inline progress bar: label + percent + reset on top line,
+    /// full-width bar below. Bar color tracks the usage threshold.
+    private func makeLimitRow(label: String, percent: Double?, fallbackValue: String, resetsAt: Date?) -> NSView {
+        let color = usageColor(percent)
+        let valueText = percent.map { String(format: "%.0f%%", $0) } ?? fallbackValue
+
+        let lbl = NSTextField(labelWithString: label)
+        lbl.font = NSFont.systemFont(ofSize: 12)
+        lbl.textColor = .labelColor
+
+        let val = NSTextField(labelWithString: valueText)
+        val.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .semibold)
+        val.textColor = color
+
+        let resetLbl: NSTextField? = resetsAt.map { _ in
+            let l = NSTextField(labelWithString: "↻ \(Hud.resetsIn(resetsAt))")
+            l.font = NSFont.systemFont(ofSize: 10)
+            l.textColor = .tertiaryLabelColor
+            return l
+        }
+
+        let rightStack = NSStackView()
+        rightStack.orientation = .horizontal
+        rightStack.alignment = .firstBaseline
+        rightStack.spacing = 8
+        rightStack.addArrangedSubview(val)
+        if let r = resetLbl { rightStack.addArrangedSubview(r) }
+
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+        let header = NSStackView(views: [lbl, spacer, rightStack])
+        header.orientation = .horizontal
+        header.alignment = .firstBaseline
+        header.distribution = .fill
+        header.spacing = 6
+
+        let bar = ProgressBarView()
+        bar.value = max(0, min(1, (percent ?? 0) / 100.0))
+        bar.tint = color
+        bar.corner = 2
+        bar.translatesAutoresizingMaskIntoConstraints = false
+
+        let stack = NSStackView(views: [header, bar])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 5
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        header.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        bar.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        bar.heightAnchor.constraint(equalToConstant: 4).isActive = true
+        return stack
+    }
+
+    /// Simple key/value row without a bar — used for stats that aren't a
+    /// proportion of a known budget (e.g. raw session token counter).
+    private func makeSimpleStatRow(label: String, value: String, valueColor: NSColor) -> NSView {
+        let lbl = NSTextField(labelWithString: label)
+        lbl.font = NSFont.systemFont(ofSize: 12)
+        lbl.textColor = .labelColor
+
+        let val = NSTextField(labelWithString: value)
+        val.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .semibold)
+        val.textColor = valueColor
+
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+        let row = NSStackView(views: [lbl, spacer, val])
+        row.orientation = .horizontal
+        row.alignment = .firstBaseline
+        row.distribution = .fill
+        row.spacing = 6
+        row.translatesAutoresizingMaskIntoConstraints = false
+        return row
+    }
+
+    private func buildConcurrentSessions(agent a: Agent) -> NSView {
+        let (container, stack) = sectionContainer()
+        stack.spacing = 4
+
+        let header = NSTextField(labelWithString: L10n.text("Parallel sessions", "Paralel oturumlar"))
+        header.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        header.textColor = .secondaryLabelColor
+        stack.addArrangedSubview(header)
+
+        let topId = a.activeSessions.first?.id
+        for sess in a.activeSessions where sess.id != topId {
+            let proj = NSTextField(labelWithString: sess.project)
+            proj.font = NSFont.systemFont(ofSize: 12)
+            proj.textColor = .labelColor
+            proj.lineBreakMode = .byTruncatingMiddle
+
+            let pctStr = sess.ctxPct.map { String(format: "%.0f%%", $0) } ?? "—"
+            let pct = NSTextField(labelWithString: pctStr)
+            pct.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .semibold)
+            pct.textColor = Hud.ctxColor(sess.ctxPct)
+
+            let when = sess.lastTurn.map { Hud.relative($0) } ?? "—"
+            let whenLbl = NSTextField(labelWithString: when)
+            whenLbl.font = NSFont.systemFont(ofSize: 10)
+            whenLbl.textColor = .tertiaryLabelColor
+
+            let right = NSStackView(views: [pct, whenLbl])
+            right.orientation = .horizontal
+            right.alignment = .firstBaseline
+            right.spacing = 8
+
+            let sp = NSView()
+            sp.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+            let r = NSStackView(views: [proj, sp, right])
+            r.orientation = .horizontal
+            r.alignment = .firstBaseline
+            r.distribution = .fill
+            r.spacing = 6
+            stack.addArrangedSubview(r)
+            r.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        }
+        return container
+    }
+
+    private func buildOthers(tools: [ToolSummary]) -> NSView {
+        let (container, stack) = sectionContainer()
+        stack.spacing = 4
+
+        let header = NSTextField(labelWithString: L10n.text("Other tools", "Diğer araçlar"))
+        header.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        header.textColor = .secondaryLabelColor
+        stack.addArrangedSubview(header)
+
+        for tool in tools {
+            let r = OtherToolRowView(tool: tool)
+            stack.addArrangedSubview(r)
+            r.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        }
+        return container
+    }
+
+    private func buildFooter() -> NSView {
+        let container = NSView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+
+        let themeBtn = makeThemeButton()
+        themeBtn.translatesAutoresizingMaskIntoConstraints = false
+
+        let settingsBtn = FooterIconButton(
+            symbol: "slider.horizontal.3",
+            tooltip: L10n.text("Settings", "Ayarlar"),
+            target: self,
+            action: #selector(handleSettings)
+        )
+        let refreshBtn = FooterIconButton(
+            symbol: "arrow.clockwise",
+            tooltip: L10n.text("Refresh", "Yenile"),
+            target: self,
+            action: #selector(handleRefresh)
+        )
+        let quitBtn = FooterIconButton(
+            symbol: "power",
+            tooltip: L10n.text("Quit", "Çık"),
+            target: self,
+            action: #selector(handleQuit)
+        )
+
+        let rightStack = NSStackView(views: [settingsBtn, refreshBtn, quitBtn])
+        rightStack.orientation = .horizontal
+        rightStack.spacing = 4
+        rightStack.translatesAutoresizingMaskIntoConstraints = false
+
+        container.addSubview(themeBtn)
+        container.addSubview(rightStack)
+
+        NSLayoutConstraint.activate([
+            themeBtn.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            themeBtn.topAnchor.constraint(equalTo: container.topAnchor, constant: 8),
+            themeBtn.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -8),
+            themeBtn.trailingAnchor.constraint(lessThanOrEqualTo: rightStack.leadingAnchor, constant: -14),
+            rightStack.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            rightStack.centerYAnchor.constraint(equalTo: themeBtn.centerYAnchor),
+        ])
+        return container
+    }
+
+    private func makeThemeButton() -> NSView {
+        let popup = NSPopUpButton(frame: .zero, pullsDown: false)
+        popup.bezelStyle = .rounded
+        popup.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        popup.translatesAutoresizingMaskIntoConstraints = false
+        popup.target = self
+        popup.action = #selector(handleThemePopupChange(_:))
+
+        let currentId = ThemeStore.current.id
+        for theme in Theme.all {
+            let item = NSMenuItem(title: theme.name, action: nil, keyEquivalent: "")
+            item.representedObject = theme.id
+            item.attributedTitle = themeSwatchTitle(theme: theme)
+            popup.menu?.addItem(item)
+        }
+        if let idx = Theme.all.firstIndex(where: { $0.id == currentId }) {
+            popup.selectItem(at: idx)
+        }
+        popup.menu?.delegate = self
+
+        let prefix = NSTextField(labelWithString: L10n.text("Theme", "Tema"))
+        prefix.font = NSFont.systemFont(ofSize: 11)
+        prefix.textColor = .tertiaryLabelColor
+
+        let stack = NSStackView(views: [prefix, popup])
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 6
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        return stack
+    }
+
+    @objc private func handleThemePopupChange(_ sender: NSPopUpButton) {
+        guard let id = sender.selectedItem?.representedObject as? String else { return }
+        onPickTheme?(id)
+    }
+
+    // MARK: NSMenuDelegate — live theme preview while hovering items.
+
+    func menu(_ menu: NSMenu, willHighlight item: NSMenuItem?) {
+        if let id = item?.representedObject as? String,
+           Theme.all.contains(where: { $0.id == id }) {
+            onPreviewTheme?(id)
+        } else {
+            onPreviewTheme?(nil)
+        }
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        onPreviewTheme?(nil)
+    }
+
+    /// Builds a "● ● ●  Theme name" attributed string where the bullets are
+    /// rendered in the theme's agent / project / accent colors. Lets the user
+    /// see each theme's palette inline without reading a label.
+    private func themeSwatchTitle(theme: Theme, compact: Bool = false) -> NSAttributedString {
+        let font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        let result = NSMutableAttributedString()
+        let swatchAttrs: (NSColor) -> [NSAttributedString.Key: Any] = { color in
+            [.font: font, .foregroundColor: color]
+        }
+        result.append(NSAttributedString(string: "● ", attributes: swatchAttrs(theme.agentColor)))
+        result.append(NSAttributedString(string: "● ", attributes: swatchAttrs(theme.projectColor)))
+        result.append(NSAttributedString(string: "● ", attributes: swatchAttrs(theme.pctMid)))
+        result.append(NSAttributedString(string: " ", attributes: [.font: font]))
+        result.append(NSAttributedString(
+            string: theme.name,
+            attributes: [.font: font, .foregroundColor: NSColor.labelColor]
+        ))
+        if !compact {
+            // Trailing example token ("42%") in the theme's percent color so
+            // the user sees how the numeric values will render.
+            result.append(NSAttributedString(
+                string: "   42%",
+                attributes: [
+                    .font: NSFont.monospacedSystemFont(ofSize: 10.5, weight: .regular),
+                    .foregroundColor: theme.pctMid,
+                ]
+            ))
+        }
+        return result
+    }
+
+    private func usageColor(_ pct: Double?) -> NSColor {
+        guard let pct else { return .labelColor }
+        if pct >= 90 { return .systemRed }
+        if pct >= 70 { return .systemOrange }
+        return .systemGreen
+    }
+
+    // MARK: Actions
+
+    @objc private func handleSettings() { onOpenSettings?() }
+    @objc private func handleRefresh() { onRefresh?() }
+    @objc private func handleQuit() { onQuit?() }
+    @objc private func handleThemePick(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String else { return }
+        onPickTheme?(id)
+    }
+}
+
 final class DetailWindowController: NSWindowController, NSWindowDelegate {
     private let tabVC = NSTabViewController()
     let usageVC = UsageViewController()
@@ -2412,16 +3228,17 @@ final class DetailWindowController: NSWindowController, NSWindowDelegate {
         [usageItem, appearanceItem, menubarItem, aboutItem].forEach(tabVC.addTabViewItem)
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 980, height: 760),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            contentRect: NSRect(x: 0, y: 0, width: 820, height: 680),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
         window.title = "ContextHUD"
         window.titleVisibility = .hidden
-        window.titlebarAppearsTransparent = false
+        window.titlebarAppearsTransparent = true
         window.toolbarStyle = .preference
         window.isReleasedWhenClosed = false
+        window.minSize = NSSize(width: 720, height: 560)
         window.center()
         window.contentViewController = tabVC
         self.window = window
@@ -2469,13 +3286,15 @@ final class DetailWindowController: NSWindowController, NSWindowDelegate {
     }
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     var statusItem: NSStatusItem!
     var timer: Timer!
     var detailWindow: DetailWindowController?
     let hud = Hud()
     var lastActive: Agent?
-    var previewTheme: Theme?
+    private var previewTheme: Theme?
+    private let popover = NSPopover()
+    private let popoverVC = MenubarPopoverViewController()
     private var fsStream: FSEventStreamRef?
     private var fsDebounce: DispatchWorkItem?
     private var fsRunning = false
@@ -2486,6 +3305,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         // No icon — title-only menubar entry to save horizontal space.
 
+        setupPopover()
         refresh()
         if ProcessInfo.processInfo.environment["CONTEXTHUD_OPEN_WINDOW"] == "1" {
             openDetail()
@@ -2500,6 +3320,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if ProcessInfo.processInfo.environment["CONTEXTHUD_MENU_SCREENSHOT_PATH"] != nil {
             // External script (marketing-screenshot.sh) handles the actual capture.
             // This env var just prevents the timer so the app stays responsive.
+        }
+        if let popoverPath = ProcessInfo.processInfo.environment["CONTEXTHUD_POPOVER_SCREENSHOT_PATH"] {
+            // Auto-open the menubar popover, give it a moment to lay out, then
+            // shell out to `screencapture -l` on the popover's window number so
+            // marketing can rebuild docs/images/context-hud-menubar.png without
+            // manual click-and-frame work.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
+                self?.togglePopover(nil)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
+                    self?.capturePopover(to: popoverPath)
+                    NSApp.terminate(nil)
+                }
+            }
         }
 
         timer = Timer.scheduledTimer(
@@ -2613,117 +3446,82 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    /// Wires the popover and rewires the status item button to toggle it. The
+    /// status item no longer owns an NSMenu — both left and right clicks open
+    /// the modern popover panel. Quick actions (settings/refresh/quit/theme)
+    /// live in the popover footer.
+    private func setupPopover() {
+        popover.behavior = .transient
+        popover.animates = true
+        popover.contentViewController = popoverVC
+        popover.delegate = self
+        if #available(macOS 14.0, *) {
+            popover.hasFullSizeContent = true
+        }
+
+        popoverVC.onOpenSettings = { [weak self] in
+            self?.popover.performClose(nil)
+            self?.openDetail()
+        }
+        popoverVC.onRefresh = { [weak self] in
+            self?.refreshNow()
+            self?.popoverVC.rebuild()
+        }
+        popoverVC.onQuit = { [weak self] in
+            self?.quit()
+        }
+        popoverVC.onPickTheme = { [weak self] id in
+            ThemeStore.set(id)
+            self?.previewTheme = nil
+            self?.refresh()
+            self?.popoverVC.rebuild()
+            self?.detailWindow?.load()
+        }
+        popoverVC.onPreviewTheme = { [weak self] id in
+            guard let self else { return }
+            self.previewTheme = id.map { Theme.by(id: $0) }
+            self.repaintTitle()
+        }
+
+        if let button = statusItem.button {
+            button.target = self
+            button.action = #selector(togglePopover(_:))
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        }
+    }
+
+    @objc func togglePopover(_ sender: Any?) {
+        guard let button = statusItem.button else { return }
+        if popover.isShown {
+            popover.performClose(sender)
+            return
+        }
+        regenerateThenRefresh()
+        popoverVC.rebuild()
+        // Activate so popover window becomes key — without this an accessory
+        // app's popover requires a first focus-click before buttons respond.
+        NSApp.activate(ignoringOtherApps: true)
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        if let win = popover.contentViewController?.view.window {
+            win.makeKey()
+        }
+    }
+
     func refresh() {
-        let (active, all, others) = hud.load()
+        let (active, _, _) = hud.load()
         lastActive = active
-        let titleTheme = previewTheme ?? ThemeStore.current
-        statusItem.button?.attributedTitle = composeTitle(active: active, theme: titleTheme)
-
-        let menu = NSMenu()
-        if all.isEmpty {
-            let empty = NSMenuItem(title: L10n.text("No agent data yet", "Henüz ajan verisi yok"), action: nil, keyEquivalent: "")
-            empty.isEnabled = false
-            menu.addItem(empty)
-        } else {
-            let ordered = (active.map { [$0] } ?? []) + all.filter { $0.name != active?.name }
-            for (i, a) in ordered.enumerated() {
-                let isActive = (a.name == active?.name)
-                appendAgent(menu: menu, agent: a, active: isActive)
-                if i < ordered.count - 1 {
-                    menu.addItem(NSMenuItem.separator())
-                }
-            }
+        repaintTitle()
+        if popover.isShown {
+            popoverVC.rebuild()
         }
+    }
 
-        // Limits — rolling 5h/7d usage windows for subscription-based agents.
-        // Only shown for agents that have actual percent data (Claude Pro/Max).
-        // Codex uses OpenAI token billing with no rolling message limits.
-        let limitAgents = all.filter { $0.session5hPercent != nil || $0.week7dPercent != nil }
-        if !limitAgents.isEmpty {
-            menu.addItem(NSMenuItem.separator())
-            let h = NSMenuItem()
-            h.isEnabled = false
-            h.attributedTitle = NSAttributedString(
-                string: L10n.text("LIMITS", "LİMİTLER"),
-                attributes: [
-                    .font: NSFont.menuFont(ofSize: NSFont.smallSystemFontSize - 1),
-                    .foregroundColor: NSColor.tertiaryLabelColor,
-                ]
-            )
-            menu.addItem(h)
-            for a in limitAgents {
-                appendLimits(menu: menu, agent: a)
-            }
-        }
-
-        // Other AI tools detected on this system
-        if !others.isEmpty {
-            menu.addItem(NSMenuItem.separator())
-            let header = NSMenuItem(title: L10n.text("Other Tools", "Diğer Araçlar"), action: nil, keyEquivalent: "")
-            header.isEnabled = false
-            header.attributedTitle = NSAttributedString(
-                string: L10n.text("OTHER TOOLS", "DİĞER ARAÇLAR"),
-                attributes: [
-                    .font: NSFont.menuFont(ofSize: NSFont.smallSystemFontSize - 1),
-                    .foregroundColor: NSColor.tertiaryLabelColor,
-                ]
-            )
-            menu.addItem(header)
-            for tool in others {
-                appendTool(menu: menu, tool: tool)
-            }
-        }
-
-        menu.addItem(NSMenuItem.separator())
-
-        // Theme submenu — each entry previews its own colors using a sample
-        // title so the user can compare looks before committing.
-        let themeRoot = NSMenuItem(title: L10n.text("Theme", "Tema"), action: nil, keyEquivalent: "")
-        let themeMenu = NSMenu(title: L10n.text("Theme", "Tema"))
-        let currentId = ThemeStore.current.id
-        let sampleProject = active?.project ?? "project"
-        let samplePct = active?.ctxPct ?? 42.0
-        for t in Theme.all {
-            let item = NSMenuItem(
-                title: t.name,
-                action: #selector(pickTheme(_:)),
-                keyEquivalent: ""
-            )
-            item.representedObject = t.id
-            item.state = (t.id == currentId) ? .on : .off
-            // Preview: render the sample title in the theme's own colors.
-            item.attributedTitle = styleTitle(
-                agent: t.name,
-                project: sampleProject,
-                pct: samplePct,
-                theme: t,
-                font: NSFont.menuFont(ofSize: 0),
-                renderAgentAsIcon: false
-            )
-            themeMenu.addItem(item)
-        }
-        themeMenu.delegate = self
-        themeRoot.submenu = themeMenu
-        menu.addItem(themeRoot)
-
-        menu.addItem(NSMenuItem(
-            title: L10n.text("Open detail report…", "Detay raporunu aç…"),
-            action: #selector(openDetail),
-            keyEquivalent: "d"
-        ))
-        menu.addItem(NSMenuItem(
-            title: L10n.text("Refresh now", "Şimdi yenile"),
-            action: #selector(refreshNow),
-            keyEquivalent: "r"
-        ))
-        menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(
-            title: L10n.text("Quit ContextHUD", "ContextHUD'dan çık"),
-            action: #selector(quit),
-            keyEquivalent: "q"
-        ))
-
-        statusItem.menu = menu
+    /// Repaints the status bar title using the current preview theme if any,
+    /// otherwise the persisted theme. Used both on refresh and during the
+    /// theme picker's live hover preview.
+    private func repaintTitle() {
+        let theme = previewTheme ?? ThemeStore.current
+        statusItem.button?.attributedTitle = composeTitle(active: lastActive, theme: theme)
     }
 
     /// Builds the compact menubar title using the active theme:
@@ -2796,8 +3594,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return s
     }
 
-    /// Appends a 2-line block describing one agent, themed by the current theme.
-    private func appendAgent(menu: NSMenu, agent a: Agent, active: Bool, theme: Theme = ThemeStore.current) {
+    /// Legacy NSMenu agent block — retained as a stub for compatibility; the
+    /// modern popover renders agents via MenubarPopoverViewController instead.
+    private func appendAgent_legacy_unused(menu: NSMenu, agent a: Agent, active: Bool, theme: Theme = ThemeStore.current) {
         let header = NSMenuItem()
         header.isEnabled = false
         let pctStr = a.ctxPct.map { String(format: "%.0f%%", $0) } ?? "—"
@@ -2895,28 +3694,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    // MARK: - NSMenuDelegate (live theme preview)
-
-    func menu(_ menu: NSMenu, willHighlight item: NSMenuItem?) {
-        guard let item, let themeId = item.representedObject as? String,
-              Theme.all.contains(where: { $0.id == themeId }) else {
-            if previewTheme != nil {
-                previewTheme = nil
-                statusItem.button?.attributedTitle = composeTitle(active: lastActive)
-            }
-            return
-        }
-        let theme = Theme.by(id: themeId)
-        previewTheme = theme
-        statusItem.button?.attributedTitle = composeTitle(active: lastActive, theme: theme)
-    }
-
-    func menuDidClose(_ menu: NSMenu) {
-        previewTheme = nil
-        statusItem.button?.attributedTitle = composeTitle(active: lastActive)
-    }
-
-    private func appendLimits(menu: NSMenu, agent a: Agent) {
+    private func appendLimits_legacy_unused(menu: NSMenu, agent a: Agent) {
         // Agent name row
         let nameItem = NSMenuItem()
         nameItem.isEnabled = false
@@ -2949,7 +3727,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    private func appendTool(menu: NSMenu, tool: ToolSummary) {
+    private func appendTool_legacy_unused(menu: NSMenu, tool: ToolSummary) {
         let item = NSMenuItem()
         item.isEnabled = false
         let tok = tool.tokens7d > 0 ? "  \(Hud.formatTokens(tool.tokens7d))" : ""
@@ -2970,7 +3748,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(item)
     }
 
-    @objc func pickTheme(_ sender: NSMenuItem) {
+    @objc func pickTheme_legacy_unused(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? String else { return }
         ThemeStore.set(id)
         refresh()
@@ -3018,6 +3796,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         try? task.run()
         task.waitUntilExit()
         NSApp.terminate(nil)
+    }
+
+    /// Screencaptures the open popover's window to `path`. Locates the
+    /// popover's CGWindow by finding the largest visible window owned by
+    /// this process — the popover is system-managed and isn't reachable as
+    /// an NSWindow, so we go through CGWindowList + the `screencapture` CLI.
+    private func capturePopover(to path: String) {
+        guard let list = CGWindowListCopyWindowInfo(
+            [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID
+        ) as? [[String: Any]] else { return }
+
+        let myPID = Int(ProcessInfo.processInfo.processIdentifier)
+        var bestID: CGWindowID = kCGNullWindowID
+        var bestArea: Double = 0
+        for info in list {
+            guard let pid = info[kCGWindowOwnerPID as String] as? Int, pid == myPID,
+                  let widInt = info[kCGWindowNumber as String] as? Int,
+                  let boundsAny = info[kCGWindowBounds as String] as? [String: Any],
+                  let w = boundsAny["Width"] as? Double,
+                  let h = boundsAny["Height"] as? Double,
+                  w > 200, h > 200
+            else { continue }
+            let area = w * h
+            if area > bestArea { bestArea = area; bestID = CGWindowID(widInt) }
+        }
+        guard bestID != kCGNullWindowID else { return }
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+        task.arguments = ["-x", "-o", "-l", String(bestID), path]
+        try? task.run()
+        task.waitUntilExit()
     }
 
     @objc func quit() {

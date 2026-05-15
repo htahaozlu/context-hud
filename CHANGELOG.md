@@ -4,6 +4,40 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, adapted for the current release workflow.
 
+## [0.2.0] - 2026-05-15
+
+### Changed
+
+- Replaced the legacy NSMenu dropdown with a native NSPopover panel (vibrant
+  `.menu` material, continuous corner curves, SF Symbol toolbar). Settings,
+  refresh, quit, and theme picker now live inside the popover footer.
+- Theme picker shows live color swatches next to each option and previews
+  the menubar title in the hovered theme's palette before commit.
+- Settings window adopts a modern card style with uppercase section headers,
+  hairline borders, adaptive light/dark backgrounds, and a transparent
+  titlebar (`fullSizeContentView`).
+- Session-duration formatting now switches to days past 24h (e.g. `7d 11h`
+  instead of `179h 30m`).
+
+### Added
+
+- Per-session context percentage in parallel-session rows. The engine now
+  records `last_input_tokens` and `context_window` per active session and
+  exposes `context_pct` in `hud.json`.
+- Limit rows (5h/7d) render an inline progress bar with threshold-colored
+  fill so usage is readable at a glance instead of as a bare percentage.
+
+### Fixed
+
+- Menubar agent icons are now optically centered on the font's x-height with
+  a small downward nudge so they sit on the same visual baseline as the
+  surrounding title text.
+- Popover footer buttons no longer require a focus click — the app activates
+  before the popover is shown so the first click registers.
+- Modern card layout: cards now span the full popover width regardless of
+  intrinsic content (e.g. Parallel sessions / Other tools no longer collapse
+  to the right of the panel).
+
 ## [0.1.9] - 2026-05-13
 
 ### Changed

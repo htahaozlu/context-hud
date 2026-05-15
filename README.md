@@ -86,7 +86,7 @@ Native macOS usage window with rolling session visibility for Claude Code and Co
   <img src="docs/images/context-hud-menubar.png" alt="ContextHUD menubar" width="400">
 </p>
 
-Compact menubar status item showing active agent, project, and context usage.
+Compact menubar status item showing active agent, project, and context usage. Clicking it opens a native popover with the active session, context window, rolling 5h/7d limits, parallel sessions, and a live theme picker.
 
 ## What it does
 
@@ -131,11 +131,18 @@ For Claude Code compatibility, `CLAUDE.md` is mirrored at the repository root.
 
 The companion app reads `~/.context-hud/hud.json` and provides:
 
-- a compact menubar status view
-- a native usage window for Claude Code and Codex
-- settings for theme, language, and menubar title composition
+- a compact menubar status item (active agent + project + context %)
+- a modern AppKit popover with cards for the active agent, context window,
+  rolling 5h/7d limits with progress bars, parallel sessions, and other
+  detected AI tools
+- a theme picker with inline color swatches and live preview — hover a
+  theme and the menubar title repaints in that palette before you commit
+- a full Settings window with Usage, Appearance, Menubar, and About tabs
+- per-session context percentage for parallel Claude / Codex sessions
 
-The desktop UI is native AppKit. `detail.html` is an export artifact, not the primary app experience.
+The desktop UI is native AppKit (NSPopover + NSVisualEffectView, continuous
+corner curves, SF Symbol toolbar). `detail.html` is an export artifact, not
+the primary app experience.
 
 ## Usage
 

@@ -6,6 +6,7 @@ AGENT.md
 CLAUDE.md
 extension.wasm
 docs/sample-data/
+docs/launch/
 scripts/marketing-screenshot.sh
 __pycache__/
 *.pyc

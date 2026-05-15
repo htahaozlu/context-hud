@@ -266,6 +266,18 @@ def build_active_sessions(per_session):
     for path, s in per_session.items():
         if NOW - s["last_ts"] > ACTIVE_WINDOW:
             continue
+        # Per-session context window — explicit override (Codex), or derived
+        # from model (Claude). Falls back to None when neither is known.
+        window = s.get("last_window")
+        if not window:
+            try:
+                window = claude_context_window(s.get("model"))
+            except Exception:
+                window = None
+        last_input = int(s.get("last_input", 0) or 0)
+        context_pct = None
+        if window and last_input > 0:
+            context_pct = round(min(100.0, last_input / window * 100.0), 1)
         actives.append({
             "id": os.path.basename(path).rsplit(".", 1)[0],
             "tokens": s["tokens"],
@@ -274,6 +286,9 @@ def build_active_sessions(per_session):
             "model": s["model"],
             "cwd": s["cwd"],
             "project": project_name_from_cwd(s["cwd"]),
+            "context_pct": context_pct,
+            "context_window": window,
+            "last_input_tokens": last_input,
         })
     actives.sort(key=lambda x: x["last_turn_at"], reverse=True)
     return actives
@@ -498,11 +513,14 @@ def collect_claude():
                     age = NOW - ts
 
                     sess = per_session.setdefault(path, {
-                        "first_ts": ts, "last_ts": ts, "tokens": 0,
+                        "first_ts": ts, "last_ts": 0, "tokens": 0,
                         "model": msg.get("model"), "cwd": obj.get("cwd"),
+                        "last_input": 0,
                     })
                     sess["first_ts"] = min(sess["first_ts"], ts)
-                    sess["last_ts"] = max(sess["last_ts"], ts)
+                    if ts >= sess["last_ts"]:
+                        sess["last_ts"] = ts
+                        sess["last_input"] = inp
                     sess["tokens"] += total
                     if msg.get("model"):
                         sess["model"] = msg.get("model")
@@ -645,11 +663,16 @@ def collect_codex():
                     age = NOW - ts
 
                     sess = per_session.setdefault(path, {
-                        "first_ts": ts, "last_ts": ts, "tokens": 0,
+                        "first_ts": ts, "last_ts": 0, "tokens": 0,
                         "model": current_model, "cwd": current_cwd,
+                        "last_input": 0, "last_window": window,
                     })
                     sess["first_ts"] = min(sess["first_ts"], ts)
-                    sess["last_ts"] = max(sess["last_ts"], ts)
+                    if ts >= sess["last_ts"]:
+                        sess["last_ts"] = ts
+                        sess["last_input"] = inp
+                        if window:
+                            sess["last_window"] = window
                     sess["tokens"] += total
                     if current_model:
                         sess["model"] = current_model
