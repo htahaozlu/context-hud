@@ -173,6 +173,11 @@ final class MenubarPopoverViewController: NSViewController, NSMenuDelegate {
         meta.font = NSFont.systemFont(ofSize: 11)
         meta.textColor = .secondaryLabelColor
         meta.lineBreakMode = .byTruncatingMiddle
+        meta.maximumNumberOfLines = 1
+        meta.cell?.usesSingleLineMode = true
+        meta.toolTip = metaParts.joined(separator: "  ·  ")
+        nameLbl.maximumNumberOfLines = 1
+        nameLbl.cell?.usesSingleLineMode = true
 
         stack.addArrangedSubview(titleRow)
         stack.addArrangedSubview(meta)
@@ -429,11 +434,11 @@ final class MenubarPopoverViewController: NSViewController, NSMenuDelegate {
         container.addSubview(rightStack)
 
         NSLayoutConstraint.activate([
-            themeBtn.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            themeBtn.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 6),
             themeBtn.topAnchor.constraint(equalTo: container.topAnchor, constant: 8),
             themeBtn.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -8),
             themeBtn.trailingAnchor.constraint(lessThanOrEqualTo: rightStack.leadingAnchor, constant: -14),
-            rightStack.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            rightStack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -2),
             rightStack.centerYAnchor.constraint(equalTo: themeBtn.centerYAnchor),
         ])
         return container
