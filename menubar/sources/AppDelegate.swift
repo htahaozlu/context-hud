@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        setupMainMenu()
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         // No icon — title-only menubar entry to save horizontal space.
@@ -546,5 +547,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     @objc func quit() {
         NSApp.terminate(nil)
+    }
+
+    private func setupMainMenu() {
+        let mainMenu = NSMenu()
+        let appMenuItem = NSMenuItem()
+        mainMenu.addItem(appMenuItem)
+        let appMenu = NSMenu()
+        appMenuItem.submenu = appMenu
+        let quitItem = NSMenuItem(
+            title: "Quit ContextHUD",
+            action: #selector(quit),
+            keyEquivalent: "q"
+        )
+        appMenu.addItem(quitItem)
+        NSApp.mainMenu = mainMenu
     }
 }

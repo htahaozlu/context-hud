@@ -336,11 +336,11 @@ def apply_claude_statusline_snapshot(out):
     if not isinstance(snap, dict):
         return out
 
-    snap_ts = snap.get("_timestamp") or 0
-    transcript_ts = parse_iso(out.get("last_turn_at")) or 0
-    if transcript_ts and snap_ts < transcript_ts:
-        return out
-
+    # Statusline snapshot is authoritative for live context fields — it is
+    # what Claude itself displays. Transcript scan picks the newest assistant
+    # turn across all JSONL files (including subagent transcripts with large
+    # cache_read totals), which can wildly inflate last_context_pct. Trust
+    # the snapshot whenever it is fresh (TTL-checked in loader).
     ctx = snap.get("context_window") or {}
     current_usage = ctx.get("current_usage") or {}
 
@@ -551,7 +551,7 @@ def collect_claude():
                             + int(usage.get("cache_read_input_tokens", 0) or 0)
                             + int(usage.get("cache_creation_input_tokens", 0) or 0)
                         )
-                        out["last_context_pct"] = round(raw_in / window * 100.0, 2) if window else None
+                        out["last_context_pct"] = round(min(100.0, raw_in / window * 100.0), 2) if window else None
         except OSError:
             continue
 
@@ -698,7 +698,7 @@ def collect_codex():
                         out["active_session_file"] = path
                         out["last_context_window"] = int(window) if window else None
                         if window:
-                            out["last_context_pct"] = round(inp / int(window) * 100.0, 2)
+                            out["last_context_pct"] = round(min(100.0, inp / int(window) * 100.0), 2)
         except OSError:
             continue
 
