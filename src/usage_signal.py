@@ -43,6 +43,12 @@ NOW = time.time()
 WIN_SESSION = 5 * 3600
 WIN_WEEK = 7 * 86400
 WIN_30D = 30 * 86400
+# History window for streaks / longest streak / heatmap. Files older than this
+# are skipped during scan; aggregates pad calendar days inside this window.
+WIN_HIST = 365 * 86400
+# Idle gap that splits a single .jsonl into multiple logical sessions. Matches
+# the 5h rolling window Claude uses to reset session metrics in its own UI.
+SESSION_IDLE_GAP = 5 * 3600
 # A session is "active" if its last turn is within this window. 30 min covers
 # slow human-in-the-loop pauses without surfacing stale sessions as live.
 ACTIVE_WINDOW = 30 * 60
@@ -402,8 +408,15 @@ def project_name_from_cwd(cwd):
     return os.path.basename(cwd.rstrip("/")) or cwd
 
 
-def bucket_aggregates(per_session, days=30, weeks=12, months=12):
-    """Roll a list of session records into time buckets."""
+def bucket_aggregates(per_session, days=365, weeks=52, months=24):
+    """Roll a list of session records into time buckets.
+
+    Bucketing uses the LOCAL timezone so "most active day" and streaks line up
+    with what a human reading their calendar would see. `by_day` is padded
+    with zero-token entries for every calendar day inside the history window
+    so consumers can compute streaks by walking the array without first
+    filling in missing dates themselves.
+    """
     by_day = defaultdict(lambda: {"tokens": 0, "sessions": 0})
     by_week = defaultdict(lambda: {"tokens": 0, "sessions": 0})
     by_month = defaultdict(lambda: {"tokens": 0, "sessions": 0})
@@ -418,9 +431,8 @@ def bucket_aggregates(per_session, days=30, weeks=12, months=12):
         ts = s["last_ts"]
         if ts is None:
             continue
-        dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+        dt = datetime.fromtimestamp(ts).astimezone()
         day = dt.strftime("%Y-%m-%d")
-        # ISO week label e.g. 2026-W19
         iy, iw, _ = dt.isocalendar()
         week = f"{iy}-W{iw:02d}"
         month = dt.strftime("%Y-%m")
@@ -443,6 +455,14 @@ def bucket_aggregates(per_session, days=30, weeks=12, months=12):
             total30 += s["tokens"]
             sessions30 += 1
 
+    today_local = datetime.fromtimestamp(NOW).astimezone().date()
+    padded_day = []
+    for i in range(days):
+        d = today_local - timedelta(days=i)
+        key = d.strftime("%Y-%m-%d")
+        rec = by_day.get(key) or {"tokens": 0, "sessions": 0}
+        padded_day.append({"date": key, "tokens": rec["tokens"], "sessions": rec["sessions"]})
+
     def take(d, key_name, n, sort_key=None):
         items = [{key_name: k, **v} for k, v in d.items()]
         if sort_key:
@@ -454,12 +474,55 @@ def bucket_aggregates(per_session, days=30, weeks=12, months=12):
     return {
         "total_tokens_30d": total30,
         "total_sessions_30d": sessions30,
-        "by_day": take(by_day, "date", days, sort_key=lambda x: x["date"]),
+        "by_day": padded_day,
         "by_week": take(by_week, "week", weeks, sort_key=lambda x: x["week"]),
         "by_month": take(by_month, "month", months, sort_key=lambda x: x["month"]),
         "by_model": take(by_model, "model", 20),
         "by_project": take(by_project, "project", 20),
     }
+
+
+def split_logical_sessions(per_session):
+    """Split each file's events into sub-sessions on idle gaps.
+
+    Returns (sessions, recent) where sessions feeds bucket_aggregates and
+    recent feeds recent_sessions. A "logical session" ends when the gap to
+    the next turn exceeds SESSION_IDLE_GAP (matches Claude's 5h reset).
+    """
+    sessions = []
+    recent = []
+    for path, s in per_session.items():
+        events = sorted(s.get("events") or [], key=lambda e: e[0])
+        if not events:
+            continue
+        chunks = []
+        cur = [events[0]]
+        for prev, nxt in zip(events, events[1:]):
+            if nxt[0] - prev[0] > SESSION_IDLE_GAP:
+                chunks.append(cur)
+                cur = [nxt]
+            else:
+                cur.append(nxt)
+        chunks.append(cur)
+        base_id = os.path.basename(path).rsplit(".", 1)[0]
+        for i, chunk in enumerate(chunks):
+            first_ts = chunk[0][0]
+            last_ts = chunk[-1][0]
+            tokens = sum(t for _, t in chunk)
+            sessions.append({
+                "tokens": tokens, "last_ts": last_ts,
+                "model": s["model"], "cwd": s["cwd"],
+            })
+            recent.append({
+                "id": base_id if len(chunks) == 1 else f"{base_id}#{i + 1}",
+                "started_at": datetime.fromtimestamp(first_ts, tz=timezone.utc).isoformat().replace("+00:00", "Z"),
+                "ended_at": datetime.fromtimestamp(last_ts, tz=timezone.utc).isoformat().replace("+00:00", "Z"),
+                "duration_minutes": round((last_ts - first_ts) / 60.0, 1),
+                "tokens": tokens,
+                "model": s["model"] or "—",
+                "project": project_name_from_cwd(s["cwd"]),
+            })
+    return sessions, recent
 
 
 def collect_claude():
@@ -480,7 +543,7 @@ def collect_claude():
         if NOW - mtime > WIN_30D and NOW - mtime > WIN_WEEK:
             # skip very old for speed; still allow 30d scan above
             pass
-        if NOW - mtime > WIN_30D:
+        if NOW - mtime > WIN_HIST:
             continue
         try:
             with open(path, "r", encoding="utf-8", errors="replace") as fh:
@@ -499,10 +562,15 @@ def collect_claude():
                     usage = msg.get("usage") or {}
                     if not isinstance(usage, dict):
                         continue
-                    # Effective consumed tokens — fresh input + cache creation
-                    # + output. cache_read is excluded because it re-reports
-                    # the same cached context every turn and would inflate
-                    # rolling totals by 10-100x for long sessions.
+                    # Per Anthropic docs total input = input_tokens +
+                    # cache_creation_input_tokens + cache_read_input_tokens
+                    # (all three count toward billing). For "tokens used"
+                    # displays we follow the ccusage / Claude Code convention
+                    # and sum input + cache_creation + output, omitting
+                    # cache_read so the same cached prefix isn't counted on
+                    # every turn (which would inflate totals 10-100×).
+                    # cache_read is still rolled into `inp` for context-window
+                    # % math because the model does see those tokens.
                     fresh_in = int(usage.get("input_tokens", 0) or 0)
                     cache_create = int(usage.get("cache_creation_input_tokens", 0) or 0)
                     cache_read = int(usage.get("cache_read_input_tokens", 0) or 0)
@@ -516,12 +584,14 @@ def collect_claude():
                         "first_ts": ts, "last_ts": 0, "tokens": 0,
                         "model": msg.get("model"), "cwd": obj.get("cwd"),
                         "last_input": 0,
+                        "events": [],
                     })
                     sess["first_ts"] = min(sess["first_ts"], ts)
                     if ts >= sess["last_ts"]:
                         sess["last_ts"] = ts
                         sess["last_input"] = inp
                     sess["tokens"] += total
+                    sess["events"].append((ts, total))
                     if msg.get("model"):
                         sess["model"] = msg.get("model")
                     if obj.get("cwd"):
@@ -563,23 +633,9 @@ def collect_claude():
                 s["first_ts"], tz=timezone.utc
             ).isoformat().replace("+00:00", "Z")
 
-    # Build aggregates from per_session list.
-    sessions = []
-    recent = []
-    for path, s in per_session.items():
-        sessions.append({
-            "tokens": s["tokens"], "last_ts": s["last_ts"],
-            "model": s["model"], "cwd": s["cwd"],
-        })
-        recent.append({
-            "id": os.path.basename(path).rsplit(".", 1)[0],
-            "started_at": datetime.fromtimestamp(s["first_ts"], tz=timezone.utc).isoformat().replace("+00:00", "Z"),
-            "ended_at": datetime.fromtimestamp(s["last_ts"], tz=timezone.utc).isoformat().replace("+00:00", "Z"),
-            "duration_minutes": round((s["last_ts"] - s["first_ts"]) / 60.0, 1),
-            "tokens": s["tokens"],
-            "model": s["model"] or "—",
-            "project": project_name_from_cwd(s["cwd"]),
-        })
+    # Split each .jsonl into logical sessions on idle gaps > SESSION_IDLE_GAP
+    # so a file left open across days doesn't show up as one giant session.
+    sessions, recent = split_logical_sessions(per_session)
     out.update(bucket_aggregates(sessions))
     recent.sort(key=lambda r: r["ended_at"], reverse=True)
     out["recent_sessions"] = recent[:20]
@@ -613,7 +669,7 @@ def collect_codex():
             mtime = os.path.getmtime(path)
         except OSError:
             continue
-        if NOW - mtime > WIN_30D:
+        if NOW - mtime > WIN_HIST:
             continue
         current_model = None
         current_cwd = None
@@ -666,6 +722,7 @@ def collect_codex():
                         "first_ts": ts, "last_ts": 0, "tokens": 0,
                         "model": current_model, "cwd": current_cwd,
                         "last_input": 0, "last_window": window,
+                        "events": [],
                     })
                     sess["first_ts"] = min(sess["first_ts"], ts)
                     if ts >= sess["last_ts"]:
@@ -674,6 +731,7 @@ def collect_codex():
                         if window:
                             sess["last_window"] = window
                     sess["tokens"] += total
+                    sess["events"].append((ts, total))
                     if current_model:
                         sess["model"] = current_model
                     if current_cwd:
@@ -727,22 +785,7 @@ def collect_codex():
                 s["first_ts"], tz=timezone.utc
             ).isoformat().replace("+00:00", "Z")
 
-    sessions = []
-    recent = []
-    for path, s in per_session.items():
-        sessions.append({
-            "tokens": s["tokens"], "last_ts": s["last_ts"],
-            "model": s["model"], "cwd": s["cwd"],
-        })
-        recent.append({
-            "id": os.path.basename(path).rsplit(".", 1)[0],
-            "started_at": datetime.fromtimestamp(s["first_ts"], tz=timezone.utc).isoformat().replace("+00:00", "Z"),
-            "ended_at": datetime.fromtimestamp(s["last_ts"], tz=timezone.utc).isoformat().replace("+00:00", "Z"),
-            "duration_minutes": round((s["last_ts"] - s["first_ts"]) / 60.0, 1),
-            "tokens": s["tokens"],
-            "model": s["model"] or "—",
-            "project": project_name_from_cwd(s["cwd"]),
-        })
+    sessions, recent = split_logical_sessions(per_session)
     out.update(bucket_aggregates(sessions))
     recent.sort(key=lambda r: r["ended_at"], reverse=True)
     out["recent_sessions"] = recent[:20]

@@ -153,14 +153,28 @@ final class StatsViewController: PreferencePaneViewController {
     }
 
     private func activeDaysInRange(_ snap: Snapshot) -> (active: Int, total: Int) {
-        let slice: [Day]
         switch range {
-        case .all:    slice = snap.byDay
-        case .last30: slice = Array(snap.byDay.prefix(30))
-        case .last7:  slice = Array(snap.byDay.prefix(7))
+        case .all:
+            // Total = calendar days since first recorded activity (so the
+            // ratio stays meaningful instead of always being X/365).
+            let active = snap.byDay.filter { $0.tokens > 0 }.count
+            guard let firstActive = snap.byDay.last(where: { $0.tokens > 0 }) else {
+                return (0, 0)
+            }
+            let fmt = DateFormatter()
+            fmt.dateFormat = "yyyy-MM-dd"
+            fmt.locale = Locale(identifier: "en_US_POSIX")
+            fmt.timeZone = .current
+            guard let firstDate = fmt.date(from: firstActive.date) else { return (active, active) }
+            let days = Calendar(identifier: .gregorian).dateComponents([.day], from: firstDate, to: Date()).day ?? 0
+            return (active, max(active, days + 1))
+        case .last30:
+            let slice = Array(snap.byDay.prefix(30))
+            return (slice.filter { $0.tokens > 0 }.count, 30)
+        case .last7:
+            let slice = Array(snap.byDay.prefix(7))
+            return (slice.filter { $0.tokens > 0 }.count, 7)
         }
-        let active = slice.filter { $0.tokens > 0 }.count
-        return (active, slice.count)
     }
 
     /// Walks by_day (newest-first) and counts consecutive non-empty days from
@@ -168,8 +182,16 @@ final class StatsViewController: PreferencePaneViewController {
     /// counts yesterday and earlier as a continuous run.
     private func currentStreak(_ snap: Snapshot) -> Int {
         var streak = 0
+        var sawActive = false
         for d in snap.byDay {
-            if d.tokens > 0 { streak += 1 } else { break }
+            if d.tokens > 0 {
+                streak += 1
+                sawActive = true
+            } else if sawActive {
+                break
+            }
+            // Leading empty days (today not used yet) are skipped so the
+            // streak keeps reflecting yesterday and earlier.
         }
         return streak
     }
@@ -191,7 +213,31 @@ final class StatsViewController: PreferencePaneViewController {
     }
 
     private func favoriteModel(_ snap: Snapshot) -> String? {
-        snap.byModel.first?.model
+        snap.byModel.first.map { prettyModelName($0.model) }
+    }
+
+    /// Map Anthropic / OpenAI model IDs to the short labels each vendor shows
+    /// in its own UI. Unknown IDs fall back to the raw string.
+    private func prettyModelName(_ id: String) -> String {
+        let m = id.lowercased()
+        let suffix = m.contains("[1m]") || m.contains("-1m") ? " (1M)" : ""
+        let base: String
+        switch true {
+        case m.contains("opus-4-7"):    base = "Opus 4.7"
+        case m.contains("opus-4-6"):    base = "Opus 4.6"
+        case m.contains("opus-4-5"):    base = "Opus 4.5"
+        case m.contains("opus-4"):      base = "Opus 4"
+        case m.contains("sonnet-4-6"):  base = "Sonnet 4.6"
+        case m.contains("sonnet-4-5"):  base = "Sonnet 4.5"
+        case m.contains("sonnet-4"):    base = "Sonnet 4"
+        case m.contains("haiku-4-5"):   base = "Haiku 4.5"
+        case m.contains("haiku-4"):     base = "Haiku 4"
+        case m.contains("gpt-5"):       base = "GPT-5"
+        case m.contains("gpt-4"):       base = "GPT-4"
+        case m.contains("mythos"):      base = "Claude Mythos"
+        default:                        return id
+        }
+        return base + suffix
     }
 
     // MARK: - Render
@@ -259,7 +305,9 @@ final class StatsViewController: PreferencePaneViewController {
         }
 
         let hm = HeatmapView()
-        hm.values = snap.byDay.map { (date: $0.date, tokens: $0.tokens) }
+        // Limit to the last 30 days so cells stay readable; the full byDay
+        // window (≈365) is kept around for streak / longest-streak math.
+        hm.values = snap.byDay.prefix(30).map { (date: $0.date, tokens: $0.tokens) }
         hm.translatesAutoresizingMaskIntoConstraints = false
         heatmapHost.addSubview(hm)
         NSLayoutConstraint.activate([
