@@ -73,6 +73,8 @@ pub struct AgentUsage {
     #[serde(default)]
     pub total_sessions_30d: u64,
     #[serde(default)]
+    pub max_session_minutes: f64,
+    #[serde(default)]
     pub by_day: Vec<TimeBucket>,
     #[serde(default)]
     pub by_week: Vec<TimeBucket>,

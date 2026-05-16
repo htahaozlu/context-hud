@@ -512,9 +512,19 @@ def bucket_aggregates(per_session, days=365, weeks=52, months=24):
             items.sort(key=lambda x: x["tokens"], reverse=True)
         return items[:n]
 
+    # Longest single session across the whole scanned history (minutes).
+    # Computed here so it isn't capped to recent_sessions (last 20).
+    max_session_minutes = 0.0
+    for s in per_session:
+        if s.get("first_ts") is None or s.get("last_ts") is None:
+            continue
+        dur = (s["last_ts"] - s["first_ts"]) / 60.0
+        if dur > max_session_minutes:
+            max_session_minutes = dur
     return {
         "total_tokens_30d": total30,
         "total_sessions_30d": sessions30,
+        "max_session_minutes": round(max_session_minutes, 1),
         "by_day": padded_day,
         "by_week": take(by_week, "week", weeks, sort_key=lambda x: x["week"]),
         "by_month": take(by_month, "month", months, sort_key=lambda x: x["month"]),
@@ -564,6 +574,7 @@ def split_logical_sessions(per_session):
             cache_read = sum(_ev(e)[2] for e in chunk)
             sessions.append({
                 "tokens": tokens, "cache_read": cache_read, "last_ts": last_ts,
+                "first_ts": first_ts,
                 "model": s["model"], "cwd": s["cwd"],
             })
             recent.append({
@@ -651,7 +662,13 @@ def collect_claude():
                                 or kl == "output_thinking_tokens"):
                             outp += int(v or 0)
                     inp = fresh_in + cache_create + cache_read  # context-window view
-                    total = fresh_in + cache_create + outp  # fresh-work view (ccusage)
+                    # Display "total" matches Claude's /usage screen — fresh
+                    # input + output only. cache_creation is excluded because
+                    # /usage doesn't surface it under "Total tokens" (it
+                    # multiplies wildly across turns and would not match what
+                    # users see in their Anthropic UI). cache_read tracked
+                    # separately so the future cost view can still bill it.
+                    total = fresh_in + outp
                     ts = parse_iso(obj.get("timestamp")) or mtime
                     age = NOW - ts
 

@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, adapted for the current release workflow.
 
+## [0.3.4] - 2026-05-16
+
+### Fixed
+
+- Stats `total tokens` aligned with Claude's `/usage` "Total tokens" display. Previous formula summed `fresh_in + cache_create + outp` which inflated the all-time number ~2.6× over what users see in their Anthropic UI (e.g. 415M vs ~160M). New formula: `total = fresh_in + outp`. `cache_read_tokens_*` and per-bucket `cache_read` still emitted separately so a future cost view can multiply by the 0.1× rate.
+- Hero context meter and detail line now always render even when `last_context_pct` / `last_context_window` is unknown (bar shows 0, detail shows "context unknown" or session-tokens-only). Previously the entire context row disappeared so users thought the feature broke.
+- Popover footer "Theme" caption pinned single-line with the popup absorbing the squeeze — fixes the "Them\nE" two-line wrap. Footer container insets symmetric (leading/trailing 0, vertical 8pt) and outer stack bottom inset reduced to 8pt so the gap below the footer matches the side rhythm.
+
+### Added
+
+- Stats pane: Claude / Codex provider segmented control. Each provider scanned from its own transcripts.
+- `max_session_minutes` field on each `AgentUsage` block — longest single session across the whole scanned history, no longer capped to the 20-row `recent_sessions` tail. Surfaced as the "longest session" tile in stats.
+
 ## [0.3.3] - 2026-05-16
 
 ### Fixed

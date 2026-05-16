@@ -13,9 +13,12 @@ import Foundation
 ///   - total_tokens_30d / total_sessions_30d
 final class StatsViewController: PreferencePaneViewController {
     enum Range: Int { case all = 0, last30 = 1, last7 = 2 }
+    enum Provider: Int { case claude = 0, codex = 1 }
     private var range: Range = .all
+    private var provider: Provider = .claude
 
     private let rangeControl = NSSegmentedControl()
+    private let providerControl = NSSegmentedControl()
     private let tilesStack = NSStackView()
     private let heatmapHost = NSView()
     private let comparisonLabel = NSTextField(labelWithString: "")
@@ -28,6 +31,23 @@ final class StatsViewController: PreferencePaneViewController {
     }
 
     private func buildUI() {
+        providerControl.segmentStyle = .texturedRounded
+        providerControl.segmentCount = 2
+        providerControl.setLabel("Claude", forSegment: 0)
+        providerControl.setLabel("Codex", forSegment: 1)
+        providerControl.selectedSegment = 0
+        providerControl.target = self
+        providerControl.action = #selector(providerChanged(_:))
+        providerControl.translatesAutoresizingMaskIntoConstraints = false
+        addSection(
+            title: L10n.text("Provider", "Sağlayıcı"),
+            subtitle: L10n.text(
+                "Stats source. Each provider is scanned from its own transcripts.",
+                "İstatistik kaynağı. Her sağlayıcı kendi transkriptlerinden taranır."
+            ),
+            body: providerControl
+        )
+
         rangeControl.segmentStyle = .texturedRounded
         rangeControl.segmentCount = 3
         rangeControl.setLabel(L10n.text("All time", "Tüm zaman"), forSegment: 0)
@@ -83,6 +103,11 @@ final class StatsViewController: PreferencePaneViewController {
         reload()
     }
 
+    @objc private func providerChanged(_ sender: NSSegmentedControl) {
+        provider = Provider(rawValue: sender.selectedSegment) ?? .claude
+        reload()
+    }
+
     // MARK: - Data
 
     private struct Day { let date: String; let tokens: UInt64; let sessions: Int }
@@ -96,14 +121,16 @@ final class StatsViewController: PreferencePaneViewController {
         var recent: [Session] = []
         var total30dTokens: UInt64 = 0
         var total30dSessions: Int = 0
+        var maxSessionMinutes: Double = 0
     }
 
     private func loadSnapshot() -> Snapshot {
         let path = "\(NSHomeDirectory())/.context-hud/hud.json"
+        let key: String = (provider == .codex) ? "codex" : "claude"
         guard
             let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
             let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-            let c = root["claude"] as? [String: Any]
+            let c = root[key] as? [String: Any]
         else {
             return Snapshot()
         }
@@ -113,6 +140,7 @@ final class StatsViewController: PreferencePaneViewController {
         var snap = Snapshot()
         snap.total30dTokens = u64(c["total_tokens_30d"])
         snap.total30dSessions = (c["total_sessions_30d"] as? Int) ?? 0
+        snap.maxSessionMinutes = (c["max_session_minutes"] as? Double) ?? 0
         snap.byDay = ((c["by_day"] as? [[String: Any]]) ?? []).compactMap { o in
             guard let d = o["date"] as? String else { return nil }
             return Day(date: d, tokens: u64(o["tokens"]), sessions: (o["sessions"] as? Int) ?? 0)
@@ -206,7 +234,10 @@ final class StatsViewController: PreferencePaneViewController {
     }
 
     private func longestSession(_ snap: Snapshot) -> Double {
-        snap.recent.map(\.durationMinutes).max() ?? 0
+        // Prefer the server-computed all-history max so it isn't capped
+        // by the 20-row recent_sessions tail.
+        let recentMax = snap.recent.map(\.durationMinutes).max() ?? 0
+        return max(snap.maxSessionMinutes, recentMax)
     }
 
     private func mostActiveDay(_ snap: Snapshot) -> Day? {

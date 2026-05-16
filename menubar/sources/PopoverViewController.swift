@@ -42,7 +42,9 @@ final class MenubarPopoverViewController: NSViewController, NSMenuDelegate {
         // leading/trailing get the remainder via `addCard()` so every visible
         // gap around the cards is 16pt. Previously top/bottom were 16 while
         // L/R were only 12, which read as a top/right whitespace bias.
-        contentStack.edgeInsets = NSEdgeInsets(top: Spacing.m, left: 0, bottom: Spacing.m, right: 0)
+        // Footer view brings its own vertical pad — match that here so the
+        // gap above/below the footer reads symmetric with the side insets.
+        contentStack.edgeInsets = NSEdgeInsets(top: Spacing.m, left: 0, bottom: Spacing.xs, right: 0)
         contentStack.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(contentStack)
 
@@ -253,30 +255,34 @@ final class MenubarPopoverViewController: NSViewController, NSMenuDelegate {
         stack.addArrangedSubview(meta)
         topRow.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
 
-        // Context meter (capsule, 4pt). Always show — provides hero rhythm.
-        if let p = pct {
-            let bar = ProgressBarView()
-            bar.value = max(0, min(1, p / 100.0))
-            bar.tint = ThemeStore.current.accent
-            bar.gradientEnd = ThemeStore.current.pctMid
-            bar.corner = 2
-            bar.glow = p > 75
-            bar.translatesAutoresizingMaskIntoConstraints = false
-            bar.setAccessibilityLabel(L10n.text("Context usage", "Bağlam kullanımı"))
+        // Context meter (capsule, 4pt). Always show — provides hero rhythm
+        // and keeps card height stable when pct/window unknown.
+        let bar = ProgressBarView()
+        bar.value = pct.map { max(0, min(1, $0 / 100.0)) } ?? 0
+        bar.tint = ThemeStore.current.accent
+        bar.gradientEnd = ThemeStore.current.pctMid
+        bar.corner = 2
+        bar.glow = (pct ?? 0) > 75
+        bar.translatesAutoresizingMaskIntoConstraints = false
+        bar.setAccessibilityLabel(L10n.text("Context usage", "Bağlam kullanımı"))
 
-            let used = a.activeSession
-            let detailText = a.ctxWindow.map { w in
-                "\(Hud.formatTokens(used)) / \(Hud.formatTokens(w))"
-            } ?? Hud.formatTokens(used)
-            let detail = NSTextField(labelWithString: detailText)
-            detail.font = Typography.bodyMono(11, weight: .regular)
-            detail.textColor = .tertiaryLabelColor
-
-            stack.addArrangedSubview(bar)
-            stack.addArrangedSubview(detail)
-            bar.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
-            bar.heightAnchor.constraint(equalToConstant: 4).isActive = true
+        let used = a.activeSession
+        let detailText: String
+        if let w = a.ctxWindow {
+            detailText = "\(Hud.formatTokens(used)) / \(Hud.formatTokens(w))"
+        } else if used > 0 {
+            detailText = "\(Hud.formatTokens(used)) " + L10n.text("session", "oturum")
+        } else {
+            detailText = L10n.text("context unknown", "bağlam bilinmiyor")
         }
+        let detail = NSTextField(labelWithString: detailText)
+        detail.font = Typography.bodyMono(11, weight: .regular)
+        detail.textColor = .tertiaryLabelColor
+
+        stack.addArrangedSubview(bar)
+        stack.addArrangedSubview(detail)
+        bar.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        bar.heightAnchor.constraint(equalToConstant: 4).isActive = true
         return container
     }
 
@@ -616,11 +622,11 @@ final class MenubarPopoverViewController: NSViewController, NSMenuDelegate {
         container.addSubview(rightStack)
 
         NSLayoutConstraint.activate([
-            themeBtn.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 6),
-            themeBtn.topAnchor.constraint(equalTo: container.topAnchor, constant: 8),
-            themeBtn.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -8),
-            themeBtn.trailingAnchor.constraint(lessThanOrEqualTo: rightStack.leadingAnchor, constant: -14),
-            rightStack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -2),
+            themeBtn.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 0),
+            themeBtn.topAnchor.constraint(equalTo: container.topAnchor, constant: Spacing.xs),
+            themeBtn.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -Spacing.xs),
+            themeBtn.trailingAnchor.constraint(lessThanOrEqualTo: rightStack.leadingAnchor, constant: -Spacing.xs),
+            rightStack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: 0),
             rightStack.centerYAnchor.constraint(equalTo: themeBtn.centerYAnchor),
         ])
         return container
@@ -648,6 +654,15 @@ final class MenubarPopoverViewController: NSViewController, NSMenuDelegate {
 
         let prefix = NSTextField(labelWithAttributedString:
             Typography.captionAttributed(L10n.text("Theme", "Tema")))
+        prefix.lineBreakMode = .byClipping
+        prefix.cell?.usesSingleLineMode = true
+        prefix.maximumNumberOfLines = 1
+        prefix.setContentCompressionResistancePriority(.required, for: .horizontal)
+        prefix.setContentHuggingPriority(.required, for: .horizontal)
+
+        // Popup absorbs the squeeze instead of forcing "Theme" to wrap.
+        popup.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        popup.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
         let stack = NSStackView(views: [prefix, popup])
         stack.orientation = .horizontal
