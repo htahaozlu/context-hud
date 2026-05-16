@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, adapted for the current release workflow.
 
+## [0.3.5] - 2026-05-16
+
+### Fixed
+
+- Hero card vertical alignment: dot, project name, and pct now sit on the same optical line. Dot is drawn as an inline "●" glyph inside the project label's attributed string (same font, same baseline) instead of a separate `ActivityDotView` that needed cap-height / x-height Auto Layout math. Project and pct labels use the IDENTICAL font (system 22pt semibold) — previously pct used `monospacedDigitSystemFont` which has different cap/x-height metrics than `systemFont` at the same point size, so even baseline-aligned the two text rows looked off.
+- Brand icon moved from the title row to the meta row prefix (next to "Claude · model · …"). Title row now only contains the dot+project+pct trio, so vertical centering has fewer competing baselines.
+- Menubar status item agent icon: switched to cap-height-sized image with zero baseline offset so the inline icon sits at the same vertical band as the surrounding text glyphs.
+
+### Changed
+
+- Popover card order: hero (active session) → parallel sessions → per-agent limits (each with brand icon header) → other tools → footer. Limits are now shown for every agent with data, so Codex's 5h/7d numbers are visible while Claude is the foreground hero (and vice-versa).
+- Removed the standalone "Claude limits" card; both Claude and Codex now share the same `buildAgentLimits()` layout with an icon + name + last-turn header.
+
 ## [0.3.4] - 2026-05-16
 
 ### Fixed

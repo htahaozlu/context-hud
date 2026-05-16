@@ -82,18 +82,16 @@ final class MenubarPopoverViewController: NSViewController, NSMenuDelegate {
         contentStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
 
         if let agent = primary {
+            // Card order: hero (active session) → parallel sessions →
+            // per-agent limits (primary first, then any others) → other tools.
             addCard(buildHero(agent: agent, isActive: agent.name == active?.name))
-            addCard(buildStatRow(agent: agent))
             if agent.activeSessions.count > 1 {
                 addCard(buildParallelSessions(agent: agent))
             }
-            // Show the *other* agent's limits/usage too — users want Codex
-            // session/week numbers visible even when Claude is the foreground
-            // hero (and vice-versa).
-            for secondary in all where secondary.name != agent.name {
-                if hasSecondaryData(secondary) {
-                    addCard(buildSecondaryAgent(secondary))
-                }
+            // Primary agent's limits first, then any other agents with data.
+            let orderedAgents = [agent] + all.filter { $0.name != agent.name }
+            for ag in orderedAgents where hasSecondaryData(ag) {
+                addCard(buildAgentLimits(ag))
             }
         } else {
             addCard(buildEmptyState())
@@ -200,13 +198,59 @@ final class MenubarPopoverViewController: NSViewController, NSMenuDelegate {
         let (container, stack) = sectionContainer(hero: true)
         stack.spacing = Spacing.s
 
-        // Top row: brand icon + dot + project name (left) — large pct (right)
-        let dot = ActivityDotView()
-        dot.isActive = isActive
-
-        // Brand icon — Claude/Codex/etc. sourced from menubar/assets/brands.
+        // Inline "●" glyph as the activity indicator — drawing the dot as a
+        // text character in the same attributed string as the project name
+        // guarantees baseline alignment regardless of font metrics. No more
+        // Auto Layout / cap-height / x-height math.
         let projectFont = Typography.display(22, weight: .semibold)
-        let brandSize: CGFloat = round(projectFont.capHeight + 8) // visually balanced w/ 22pt cap
+        let dotColor: NSColor = isActive ? .systemGreen : .tertiaryLabelColor
+        let title = NSMutableAttributedString()
+        title.append(NSAttributedString(string: "●  ", attributes: [
+            .font: NSFont.systemFont(ofSize: 13, weight: .bold),
+            .foregroundColor: dotColor,
+            .baselineOffset: 3,
+        ]))
+        title.append(NSAttributedString(string: a.project, attributes: [
+            .font: projectFont,
+            .foregroundColor: NSColor.labelColor,
+            .kern: -0.3,
+        ]))
+        let projectLbl = NSTextField(labelWithAttributedString: title)
+        projectLbl.lineBreakMode = .byTruncatingTail
+        projectLbl.maximumNumberOfLines = 1
+        projectLbl.cell?.usesSingleLineMode = true
+        projectLbl.toolTip = a.project
+        projectLbl.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        // (dot is inline in projectLbl — no wrapper container needed)
+
+        let pct = a.ctxPct
+        let pctStr = pct.map { String(format: "%.0f%%", $0) } ?? "—"
+        let pctColor: NSColor = pct.map { Hud.ctxColor($0) } ?? .tertiaryLabelColor
+        // Use the IDENTICAL font as projectLbl — same family, weight, AND
+        // size. `monospacedDigitSystemFont` has different cap/x-height
+        // metrics than systemFont so even at 22pt vs 22pt the baseline /
+        // cap-mid won't match. Same font end-to-end is the only reliable
+        // way to get the title and pct visually centered on the same line.
+        let pctLbl = NSTextField(labelWithAttributedString: NSAttributedString(
+            string: pctStr,
+            attributes: [
+                .font: projectFont,
+                .foregroundColor: pctColor,
+                .kern: -0.3,
+            ]
+        ))
+        pctLbl.setContentHuggingPriority(.required, for: .horizontal)
+
+        // Same-size baseline align — project and pct share font metrics so
+        // .firstBaseline is also cap-mid is also centerY.
+        let topRow = NSStackView(views: [projectLbl, pctLbl])
+        topRow.orientation = .horizontal
+        topRow.alignment = .firstBaseline
+        topRow.distribution = .fill
+        topRow.spacing = Spacing.s
+
+        // Meta row: brand icon + agent name + model + time + duration
         let brandView = NSImageView()
         if let url = agentIconURL(name: a.name), let img = NSImage(contentsOf: url) {
             brandView.image = img
@@ -215,70 +259,10 @@ final class MenubarPopoverViewController: NSViewController, NSMenuDelegate {
         brandView.translatesAutoresizingMaskIntoConstraints = false
         brandView.toolTip = AgentVisual.forName(a.name).accessibilityLabel
         NSLayoutConstraint.activate([
-            brandView.widthAnchor.constraint(equalToConstant: brandSize),
-            brandView.heightAnchor.constraint(equalToConstant: brandSize),
+            brandView.widthAnchor.constraint(equalToConstant: 14),
+            brandView.heightAnchor.constraint(equalToConstant: 14),
         ])
 
-        // Project name takes the primary slot (largest, .label color)
-        let projectLbl = NSTextField(labelWithString: a.project)
-        projectLbl.attributedStringValue = NSAttributedString(string: a.project, attributes: [
-            .font: projectFont,
-            .foregroundColor: NSColor.labelColor,
-            .kern: -0.3,
-        ])
-        projectLbl.lineBreakMode = .byTruncatingTail
-        projectLbl.maximumNumberOfLines = 1
-        projectLbl.cell?.usesSingleLineMode = true
-        projectLbl.toolTip = a.project
-        projectLbl.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-
-        // Manual horizontal layout — NSStackView's .centerY uses the label's
-        // frame midline (which sits below the visual midline by half the
-        // descender), making small companions like the dot and brand icon
-        // look offset. Anchor them to the cap-height midline instead.
-        let leftStack = NSView()
-        leftStack.translatesAutoresizingMaskIntoConstraints = false
-        leftStack.addSubview(brandView)
-        leftStack.addSubview(dot)
-        leftStack.addSubview(projectLbl)
-        projectLbl.translatesAutoresizingMaskIntoConstraints = false
-        dot.translatesAutoresizingMaskIntoConstraints = false
-        let capMidline = projectLbl.firstBaselineAnchor
-        NSLayoutConstraint.activate([
-            brandView.leadingAnchor.constraint(equalTo: leftStack.leadingAnchor),
-            brandView.centerYAnchor.constraint(equalTo: capMidline,
-                                               constant: -projectFont.capHeight / 2),
-            dot.leadingAnchor.constraint(equalTo: brandView.trailingAnchor, constant: Spacing.xs),
-            dot.centerYAnchor.constraint(equalTo: capMidline,
-                                          constant: -projectFont.capHeight / 2),
-            dot.widthAnchor.constraint(equalToConstant: 10),
-            dot.heightAnchor.constraint(equalToConstant: 10),
-            projectLbl.leadingAnchor.constraint(equalTo: dot.trailingAnchor, constant: Spacing.xs),
-            projectLbl.trailingAnchor.constraint(equalTo: leftStack.trailingAnchor),
-            projectLbl.topAnchor.constraint(equalTo: leftStack.topAnchor),
-            projectLbl.bottomAnchor.constraint(equalTo: leftStack.bottomAnchor),
-        ])
-
-        // Right: big % number
-        let pct = a.ctxPct
-        let pctStr = pct.map { String(format: "%.0f%%", $0) } ?? "—"
-        let pctColor: NSColor = pct.map { Hud.ctxColor($0) } ?? .tertiaryLabelColor
-        let pctLbl = NSTextField()
-        pctLbl.isBezeled = false
-        pctLbl.isEditable = false
-        pctLbl.drawsBackground = false
-        pctLbl.attributedStringValue = Typography.displayNumberAttributed(
-            pctStr, size: 28, weight: .semibold, color: pctColor
-        )
-        pctLbl.setContentHuggingPriority(.required, for: .horizontal)
-
-        let topRow = NSStackView(views: [leftStack, pctLbl])
-        topRow.orientation = .horizontal
-        topRow.alignment = .firstBaseline
-        topRow.distribution = .fill
-        topRow.spacing = Spacing.s
-
-        // Meta line: agent · model · time · duration
         var metaParts: [String] = []
         metaParts.append(a.name)
         if let m = a.model { metaParts.append(m) }
@@ -296,9 +280,15 @@ final class MenubarPopoverViewController: NSViewController, NSMenuDelegate {
         meta.cell?.usesSingleLineMode = true
         meta.toolTip = metaText
 
+        let metaRow = NSStackView(views: [brandView, meta])
+        metaRow.orientation = .horizontal
+        metaRow.alignment = .centerY
+        metaRow.spacing = Spacing.xs
+
         stack.addArrangedSubview(topRow)
-        stack.addArrangedSubview(meta)
+        stack.addArrangedSubview(metaRow)
         topRow.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        metaRow.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
 
         // Context meter (capsule, 4pt). Always show — provides hero rhythm
         // and keeps card height stable when pct/window unknown.
@@ -384,11 +374,11 @@ final class MenubarPopoverViewController: NSViewController, NSMenuDelegate {
         return false
     }
 
-    /// Compact card for the non-foreground agent — header strip with brand
-    /// icon + name + last-turn, followed by the same 5h/7d/session rows the
-    /// hero uses. Lets the user see Codex limits while Claude is the active
-    /// session (and vice-versa) without flipping windows.
-    private func buildSecondaryAgent(_ a: Agent) -> NSView {
+    /// Limits card for one agent — header strip with brand icon + agent
+    /// name + last-turn metadata, followed by 5h / 7d / session rows. Used
+    /// for both the foreground and any other agents so every limits card has
+    /// the same visual treatment.
+    private func buildAgentLimits(_ a: Agent) -> NSView {
         let (container, stack) = sectionContainer()
         stack.spacing = Spacing.xs
 
@@ -449,40 +439,6 @@ final class MenubarPopoverViewController: NSViewController, NSMenuDelegate {
                 valueColor: .secondaryLabelColor
             ))
         }
-        for row in rows {
-            stack.addArrangedSubview(row)
-            row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
-        }
-        return container
-    }
-
-    private func buildStatRow(agent a: Agent) -> NSView {
-        let (container, stack) = sectionContainer()
-        stack.spacing = 10
-
-        var rows: [NSView] = []
-        if a.session5hPercent != nil || a.session5h > 0 {
-            rows.append(makeLimitRow(
-                label: L10n.text("5h limit", "5sa limit"),
-                percent: a.session5hPercent,
-                fallbackValue: Hud.formatTokens(a.session5h),
-                resetsAt: a.session5hResetsAt
-            ))
-        }
-        if a.week7dPercent != nil || a.week7d > 0 {
-            rows.append(makeLimitRow(
-                label: L10n.text("7d limit", "7g limit"),
-                percent: a.week7dPercent,
-                fallbackValue: Hud.formatTokens(a.week7d),
-                resetsAt: a.week7dResetsAt
-            ))
-        }
-        rows.append(makeSimpleStatRow(
-            label: L10n.text("Session total", "Oturum toplam"),
-            value: Hud.formatTokens(a.activeSession),
-            valueColor: .secondaryLabelColor
-        ))
-
         for row in rows {
             stack.addArrangedSubview(row)
             row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
