@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, adapted for the current release workflow.
 
+## [0.3.1] - 2026-05-16
+
+### Fixed
+
+- Stats totals reverted to the ccusage fresh-work view (`input + cache_create + output`, plus thinking tokens). v0.3.0's billed-tokens formula multiplied `cache_read` across every turn — a 100-turn session re-reading a 100K cached prefix produced ~10M `cache_read` even though only 100K unique tokens were ever cached, so session totals showed millions and all-time showed ~1.5T. Realistic numbers restored.
+- `cache_read_tokens_{5h,7d,30d}` and per-bucket `cache_read` are now emitted as separate fields so a future cost view can multiply by the 0.1× rate without polluting human-readable totals.
+
+### Changed
+
+- Premium UI pass across every pane (popover, usage, stats, appearance, about):
+  - New `DesignTokens.swift` with a single spacing scale (4/8/12/16/20/24/32), continuous-curve corner radii (8/12/16/20), typography ladder (28 display / 15 title / 12 body / 10 caption with proper kerning), and a unified `Surface.applyCard` recipe — removes the five different stroke/fill treatments that previously drifted between panes.
+  - Hero card: gradient overlay (theme accent 10%→2%), 28pt tabular-figures percent, 4pt gradient context capsule with soft outer glow above 75%, project-first meta with tail truncation.
+  - Sparkline: gradient-filled area + 1.5pt line + endpoint dot with accent-glow ring (replaces the previous bar chart).
+  - Heatmap: squircle cells with continuous corner curve, smooth alpha ramp on theme accent (no more `systemOrange` regardless of theme).
+  - Detail window now uses an `.underWindowBackground` `NSVisualEffectView` frost.
+  - `ActivityDotView` pulse, refresh fade, and other animations honor `accessibilityDisplayShouldReduceMotion`.
+  - Numbers everywhere use `monospacedDigitSystemFont` so values don't jitter horizontally on refresh.
+  - Accessibility labels and values added on every custom NSView (ProgressBarView, SparklineView, HeatmapView, ActivityDotView, StatTileView, DualStatTileView).
+
 ## [0.3.0] - 2026-05-16
 
 ### Fixed
