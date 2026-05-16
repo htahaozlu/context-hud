@@ -36,6 +36,7 @@ final class UsageViewController: NSViewController {
     }
 
     func reload() {
+        let savedOrigin = scrollView.contentView.bounds.origin
         container.arrangedSubviews.forEach { $0.removeFromSuperview() }
         let hud = Hud()
         let (active, all, others) = hud.load()
@@ -58,6 +59,11 @@ final class UsageViewController: NSViewController {
             let othersCard = buildOthersCard(tools: others)
             container.addArrangedSubview(othersCard)
             othersCard.widthAnchor.constraint(equalTo: container.widthAnchor).isActive = true
+        }
+
+        DispatchQueue.main.async { [scrollView] in
+            scrollView.contentView.scroll(to: savedOrigin)
+            scrollView.reflectScrolledClipView(scrollView.contentView)
         }
     }
 
@@ -107,7 +113,7 @@ final class UsageViewController: NSViewController {
         let sessDur = Hud.formatDuration(a.sessionStarted, a.lastTurn)
 
         let tiles = NSStackView(views: [
-            DualStatTileView(caption: "context",
+            DualStatTileView(caption: L10n.text("context", "bağlam"),
                              value: ctxPctStr, valueColor: Hud.ctxColor(a.ctxPct),
                              sub: ctxSub, mono: false),
             DualStatTileView(caption: L10n.text("session", "oturum"),
@@ -152,48 +158,6 @@ final class UsageViewController: NSViewController {
         return card
     }
 
-    private func buildContextRow(pct: Double, window: UInt64?, used: UInt64) -> NSView {
-        let row = NSView()
-        row.translatesAutoresizingMaskIntoConstraints = false
-
-        let lbl = NSTextField(labelWithString: L10n.text("context window", "bağlam penceresi"))
-        lbl.font = NSFont.systemFont(ofSize: 11, weight: .medium)
-        lbl.textColor = .secondaryLabelColor
-        lbl.translatesAutoresizingMaskIntoConstraints = false
-
-        let detail: String = {
-            let pctS = String(format: "%.0f%%", pct)
-            if let w = window {
-                return "\(pctS)   \(Hud.formatTokens(used)) / \(Hud.formatTokens(w))"
-            }
-            return pctS
-        }()
-        let v = NSTextField(labelWithString: detail)
-        v.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .medium)
-        v.textColor = Hud.ctxColor(pct)
-        v.alignment = .right
-        v.translatesAutoresizingMaskIntoConstraints = false
-
-        let bar = ProgressBarView()
-        bar.translatesAutoresizingMaskIntoConstraints = false
-        bar.value = max(0, min(1, pct / 100.0))
-        bar.tint = Hud.ctxColor(pct)
-
-        row.addSubview(lbl); row.addSubview(v); row.addSubview(bar)
-        NSLayoutConstraint.activate([
-            lbl.leadingAnchor.constraint(equalTo: row.leadingAnchor),
-            lbl.topAnchor.constraint(equalTo: row.topAnchor),
-            v.trailingAnchor.constraint(equalTo: row.trailingAnchor),
-            v.firstBaselineAnchor.constraint(equalTo: lbl.firstBaselineAnchor),
-            bar.leadingAnchor.constraint(equalTo: row.leadingAnchor),
-            bar.trailingAnchor.constraint(equalTo: row.trailingAnchor),
-            bar.topAnchor.constraint(equalTo: lbl.bottomAnchor, constant: 6),
-            bar.heightAnchor.constraint(equalToConstant: 6),
-            bar.bottomAnchor.constraint(equalTo: row.bottomAnchor),
-        ])
-        return row
-    }
-
     private func buildSparkline(forAgent name: String) -> NSView? {
         let path = "\(NSHomeDirectory())/.context-hud/hud.json"
         guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
@@ -222,7 +186,7 @@ final class UsageViewController: NSViewController {
 
         let spark = SparklineView()
         spark.values = Array(values)
-        spark.tint = .controlAccentColor
+        spark.tint = ThemeStore.current.pctHigh
         spark.translatesAutoresizingMaskIntoConstraints = false
 
         row.addSubview(cap); row.addSubview(totalLbl); row.addSubview(spark)

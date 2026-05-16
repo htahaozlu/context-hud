@@ -24,7 +24,7 @@ final class MenubarPopoverViewController: NSViewController, NSMenuDelegate {
         root.translatesAutoresizingMaskIntoConstraints = false
         root.wantsLayer = true
 
-        visualEffect.material = .menu
+        visualEffect.material = .popover
         visualEffect.blendingMode = .behindWindow
         visualEffect.state = .active
         visualEffect.translatesAutoresizingMaskIntoConstraints = false
@@ -161,9 +161,12 @@ final class MenubarPopoverViewController: NSViewController, NSMenuDelegate {
         titleRow.alignment = .centerY
         titleRow.spacing = 8
 
+        // Order: project first (the user's primary signal), then model, then
+        // "Xs ago", then duration. Tail truncation drops the least-important
+        // suffix (duration / time) before the project.
         var metaParts: [String] = []
-        if let m = a.model { metaParts.append(m) }
         metaParts.append(a.project)
+        if let m = a.model { metaParts.append(m) }
         if let t = a.lastTurn { metaParts.append(Hud.relative(t)) }
         let duration = Hud.formatDuration(a.sessionStarted, a.lastTurn)
         if duration != "—" {
@@ -172,7 +175,7 @@ final class MenubarPopoverViewController: NSViewController, NSMenuDelegate {
         let meta = NSTextField(labelWithString: metaParts.joined(separator: "  ·  "))
         meta.font = NSFont.systemFont(ofSize: 11)
         meta.textColor = .secondaryLabelColor
-        meta.lineBreakMode = .byTruncatingMiddle
+        meta.lineBreakMode = .byTruncatingTail
         meta.maximumNumberOfLines = 1
         meta.cell?.usesSingleLineMode = true
         meta.toolTip = metaParts.joined(separator: "  ·  ")

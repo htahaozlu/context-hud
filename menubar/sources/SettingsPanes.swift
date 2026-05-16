@@ -133,7 +133,7 @@ final class MenubarSettingsViewController: PreferencePaneViewController {
         preview.update(
             items: displayChips.currentItems,
             agent: "Claude",
-            project: "hususi-app",
+            project: L10n.text("my-project", "projem"),
             pct: 27
         )
     }

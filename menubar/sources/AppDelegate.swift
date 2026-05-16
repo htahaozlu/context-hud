@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var fsStream: FSEventStreamRef?
     private var fsDebounce: DispatchWorkItem?
     private var fsRunning = false
+    private var popoverVisible = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -116,8 +117,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
     }
 
-    @objc func tick() { regenerateThenRefresh() }
+    @objc func tick() {
+        // Battery: only refresh on timer ticks when something is actually
+        // visible. FSEvents still trigger a refresh below so the menubar
+        // title stays current. The menubar title itself is repainted on
+        // refresh() — but the engine respawn is skipped here.
+        let detailVisible = detailWindow?.window?.isVisible == true
+        guard popoverVisible || detailVisible else { return }
+        regenerateThenRefresh()
+    }
     @objc func refreshNow() { regenerateThenRefresh() }
+
+    func popoverWillShow(_ notification: Notification) { popoverVisible = true }
+    func popoverDidClose(_ notification: Notification) { popoverVisible = false }
 
     /// Spawns the bundled engine to rewrite ~/.context-hud/hud.json, then reloads
     /// the menu. Engine runs off the main thread so the menubar stays responsive;
@@ -310,166 +322,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         return s
     }
 
-    /// Legacy NSMenu agent block — retained as a stub for compatibility; the
-    /// modern popover renders agents via MenubarPopoverViewController instead.
-    private func appendAgent_legacy_unused(menu: NSMenu, agent a: Agent, active: Bool, theme: Theme = ThemeStore.current) {
-        let header = NSMenuItem()
-        header.isEnabled = false
-        let pctStr = a.ctxPct.map { String(format: "%.0f%%", $0) } ?? "—"
-        let dot = active ? theme.activeDot : theme.inactiveDot
-        let rawSep = SeparatorStore.current
-        let sep = rawSep.isEmpty ? "  " : "  \(rawSep)  "
-
-        let font = NSFont.menuFont(ofSize: 0)
-        let attr = NSMutableAttributedString()
-        attr.append(NSAttributedString(
-            string: "\(dot) ",
-            attributes: [.font: font, .foregroundColor: theme.agentColor]
-        ))
-        attr.append(agentInlineString(name: a.name, font: font, fallbackColor: theme.agentColor))
-        attr.append(NSAttributedString(
-            string: sep,
-            attributes: [.font: font, .foregroundColor: theme.separatorColor]
-        ))
-        attr.append(NSAttributedString(
-            string: a.project,
-            attributes: [.font: font, .foregroundColor: theme.projectColor]
-        ))
-        attr.append(NSAttributedString(
-            string: sep,
-            attributes: [.font: font, .foregroundColor: theme.separatorColor]
-        ))
-        attr.append(NSAttributedString(
-            string: pctStr,
-            attributes: [.font: font, .foregroundColor: theme.ctxColor(a.ctxPct)]
-        ))
-        header.attributedTitle = attr
-        menu.addItem(header)
-
-        let modelStr = a.model ?? "—"
-        let duration = Hud.formatDuration(a.sessionStarted, a.lastTurn)
-
-        // ── Active session row ─────────────────────────────────
-        let sessionItem = NSMenuItem()
-        sessionItem.isEnabled = false
-        let sess = NSMutableAttributedString()
-        let sessionFont = NSFont.menuFont(ofSize: NSFont.smallSystemFontSize)
-        let mono = NSFont.monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
-        sess.append(NSAttributedString(string: "      ", attributes: [.font: sessionFont]))
-        // Green dot when active, dim when idle
-        let dotColor: NSColor = active ? .systemGreen : .tertiaryLabelColor
-        sess.append(NSAttributedString(string: "⏺  ", attributes: [
-            .font: NSFont.menuFont(ofSize: NSFont.smallSystemFontSize - 1),
-            .foregroundColor: dotColor,
-        ]))
-        sess.append(NSAttributedString(string: modelStr, attributes: [
-            .font: mono, .foregroundColor: NSColor.labelColor,
-        ]))
-        sess.append(NSAttributedString(string: "   \(duration)", attributes: [
-            .font: sessionFont, .foregroundColor: NSColor.secondaryLabelColor,
-        ]))
-        sessionItem.attributedTitle = sess
-        menu.addItem(sessionItem)
-
-        // ── Last turn row ──────────────────────────────────────
-        let last = a.lastTurn.map { Hud.relative($0) } ?? "—"
-        let lastItem = NSMenuItem()
-        lastItem.isEnabled = false
-        lastItem.attributedTitle = NSAttributedString(
-            string: "             \(L10n.text("last turn", "son tur"))   \(last)",
-            attributes: [
-                .font: sessionFont,
-                .foregroundColor: NSColor.tertiaryLabelColor,
-            ]
-        )
-        menu.addItem(lastItem)
-
-        // If more than one session is live concurrently for this agent, render
-        // a row per session so 3-5 parallel sessions stay visible. Skip the
-        // top one (already represented by the header line above).
-        if a.activeSessions.count > 1 {
-            let concurrentSep = SeparatorStore.current.isEmpty ? "·" : SeparatorStore.current
-            let topId = a.activeSessions.first?.id
-            for sess in a.activeSessions where sess.id != topId {
-                let tok = Hud.formatTokens(sess.tokens)
-                let when = sess.lastTurn.map { Hud.relative($0) } ?? "—"
-                let proj = sess.project
-                let model = sess.model ?? "—"
-                let line = "      \(theme.inactiveDot) \(proj)  \(concurrentSep)  \(tok)  \(concurrentSep)  \(model)  \(concurrentSep)  \(when)"
-                let item = NSMenuItem()
-                item.isEnabled = false
-                item.attributedTitle = NSAttributedString(
-                    string: line,
-                    attributes: [
-                        .font: NSFont.menuFont(ofSize: NSFont.smallSystemFontSize),
-                        .foregroundColor: NSColor.tertiaryLabelColor,
-                    ]
-                )
-                menu.addItem(item)
-            }
-        }
-    }
-
-    private func appendLimits_legacy_unused(menu: NSMenu, agent a: Agent) {
-        // Agent name row
-        let nameItem = NSMenuItem()
-        nameItem.isEnabled = false
-        let nameFont = NSFont.menuFont(ofSize: NSFont.smallSystemFontSize - 0.5)
-        let nameAttr = NSMutableAttributedString(
-            string: "      ",
-            attributes: [
-                .font: nameFont,
-                .foregroundColor: NSColor.secondaryLabelColor,
-            ]
-        )
-        nameAttr.append(agentInlineString(name: a.name, font: nameFont, fallbackColor: NSColor.secondaryLabelColor))
-        nameItem.attributedTitle = nameAttr
-        menu.addItem(nameItem)
-
-        for (label, percent, resetsAt) in [
-            ("5h", a.session5hPercent, a.session5hResetsAt),
-            ("7d", a.week7dPercent, a.week7dResetsAt),
-        ] {
-            let view = LimitRowView(
-                label: label,
-                percent: percent,
-                reset: Hud.resetsIn(resetsAt)
-            )
-            view.frame = NSRect(x: 0, y: 0, width: 320, height: 38)
-            let item = NSMenuItem()
-            item.isEnabled = false
-            item.view = view
-            menu.addItem(item)
-        }
-    }
-
-    private func appendTool_legacy_unused(menu: NSMenu, tool: ToolSummary) {
-        let item = NSMenuItem()
-        item.isEnabled = false
-        let tok = tool.tokens7d > 0 ? "  \(Hud.formatTokens(tool.tokens7d))" : ""
-        let sess = tool.sessions7d > 0 ? "  \(tool.sessions7d)×/\(L10n.text("wk", "hf"))" : ""
-        let model = tool.lastModel.map { "  \($0)" } ?? ""
-        let line = "\(tool.name)\(tok)\(sess)\(model)"
-        let font = NSFont.menuFont(ofSize: NSFont.smallSystemFontSize)
-        let attr = NSMutableAttributedString()
-        attr.append(agentInlineString(name: tool.name, font: font, fallbackColor: NSColor.secondaryLabelColor))
-        attr.append(NSAttributedString(
-            string: " \(line)",
-            attributes: [
-                .font: font,
-                .foregroundColor: NSColor.secondaryLabelColor,
-            ]
-        ))
-        item.attributedTitle = attr
-        menu.addItem(item)
-    }
-
-    @objc func pickTheme_legacy_unused(_ sender: NSMenuItem) {
-        guard let id = sender.representedObject as? String else { return }
-        ThemeStore.set(id)
-        refresh()
-    }
-
     @objc func openDetail() {
         if detailWindow == nil {
             detailWindow = DetailWindowController(onThemeChange: { [weak self] _ in
@@ -556,7 +408,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         let appMenu = NSMenu()
         appMenuItem.submenu = appMenu
         let quitItem = NSMenuItem(
-            title: "Quit ContextHUD",
+            title: L10n.text("Quit ContextHUD", "ContextHUD'dan Çık"),
             action: #selector(quit),
             keyEquivalent: "q"
         )

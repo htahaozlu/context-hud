@@ -1,144 +1,6 @@
 import AppKit
 import Foundation
 
-final class MenuHeaderView: NSView {
-    override var intrinsicContentSize: NSSize { NSSize(width: 324, height: 84) }
-
-    init(active: Agent?, metadata: AppMetadata = .current) {
-        super.init(frame: NSRect(x: 0, y: 0, width: 324, height: 84))
-        wantsLayer = true
-        layer?.backgroundColor = NSColor.clear.cgColor
-
-        let title = NSTextField(labelWithString: "ContextHUD")
-        title.font = NSFont.systemFont(ofSize: 15, weight: .semibold)
-
-        let subtitleText = active.map {
-            let pct = $0.ctxPct.map { String(format: "%.0f%%", $0) } ?? "—"
-            return "\($0.name)  ·  \($0.project)  ·  \(pct)"
-        } ?? L10n.text("No active agent yet", "Henüz aktif ajan yok")
-        let subtitle = NSTextField(labelWithString: subtitleText)
-        subtitle.font = NSFont.systemFont(ofSize: 11)
-        subtitle.textColor = .secondaryLabelColor
-        subtitle.lineBreakMode = .byTruncatingTail
-
-        let textStack = NSStackView(views: [title, subtitle])
-        textStack.orientation = .vertical
-        textStack.alignment = .leading
-        textStack.spacing = 4
-        textStack.translatesAutoresizingMaskIntoConstraints = false
-
-        addSubview(textStack)
-        NSLayoutConstraint.activate([
-            textStack.topAnchor.constraint(equalTo: topAnchor, constant: 14),
-            textStack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
-            textStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
-            textStack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -14),
-        ])
-    }
-
-    required init?(coder: NSCoder) { fatalError() }
-}
-
-/// Manages the menubar title element list: drag-to-reorder rows with a
-/// checkbox per element. Persists to `DisplayStore` on every change.
-final class DisplayTableController: NSObject, NSTableViewDataSource, NSTableViewDelegate {
-    private var items: [DisplayItem] = DisplayStore.items
-    var onChange: (() -> Void)?
-    let tableView = NSTableView()
-    let scrollView = NSScrollView()
-    private static let dragType = NSPasteboard.PasteboardType("com.zedcontext.bar.displayItem.row")
-
-    override init() {
-        super.init()
-        let col = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("row"))
-        col.title = ""
-        col.width = 320
-        tableView.addTableColumn(col)
-        tableView.headerView = nil
-        tableView.rowHeight = 28
-        tableView.usesAlternatingRowBackgroundColors = false
-        tableView.backgroundColor = .clear
-        tableView.gridStyleMask = []
-        tableView.intercellSpacing = NSSize(width: 0, height: 4)
-        tableView.dataSource = self
-        tableView.delegate = self
-        tableView.registerForDraggedTypes([Self.dragType])
-        tableView.setDraggingSourceOperationMask(.move, forLocal: true)
-
-        scrollView.documentView = tableView
-        scrollView.hasVerticalScroller = false
-        scrollView.drawsBackground = false
-        scrollView.borderType = .lineBorder
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
-    }
-
-    func numberOfRows(in tableView: NSTableView) -> Int { items.count }
-
-    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        let item = items[row]
-        let cell = NSView()
-        let handle = NSTextField(labelWithString: "⠿")
-        handle.font = NSFont.systemFont(ofSize: 13)
-        handle.textColor = .tertiaryLabelColor
-        handle.translatesAutoresizingMaskIntoConstraints = false
-        let checkbox = NSButton(checkboxWithTitle: item.element.label,
-                                target: self, action: #selector(toggleEnabled(_:)))
-        checkbox.state = item.enabled ? .on : .off
-        checkbox.tag = row
-        checkbox.translatesAutoresizingMaskIntoConstraints = false
-        cell.addSubview(handle)
-        cell.addSubview(checkbox)
-        NSLayoutConstraint.activate([
-            handle.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 8),
-            handle.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-            checkbox.leadingAnchor.constraint(equalTo: handle.trailingAnchor, constant: 10),
-            checkbox.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-        ])
-        return cell
-    }
-
-    @objc private func toggleEnabled(_ sender: NSButton) {
-        guard sender.tag >= 0, sender.tag < items.count else { return }
-        items[sender.tag].enabled = (sender.state == .on)
-        persist()
-    }
-
-    // Drag source
-    func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> NSPasteboardWriting? {
-        let p = NSPasteboardItem()
-        p.setString("\(row)", forType: Self.dragType)
-        return p
-    }
-
-    func tableView(_ tableView: NSTableView,
-                   validateDrop info: NSDraggingInfo,
-                   proposedRow row: Int,
-                   proposedDropOperation op: NSTableView.DropOperation) -> NSDragOperation {
-        return op == .above ? .move : []
-    }
-
-    func tableView(_ tableView: NSTableView,
-                   acceptDrop info: NSDraggingInfo,
-                   row: Int,
-                   dropOperation: NSTableView.DropOperation) -> Bool {
-        guard let pbItems = info.draggingPasteboard.pasteboardItems,
-              let str = pbItems.first?.string(forType: Self.dragType),
-              let from = Int(str) else { return false }
-        let target = from < row ? row - 1 : row
-        if target == from { return false }
-        let moved = items.remove(at: from)
-        items.insert(moved, at: max(0, min(items.count, target)))
-        tableView.reloadData()
-        persist()
-        return true
-    }
-
-    private func persist() {
-        DisplayStore.save(items)
-        onChange?()
-    }
-}
-
 final class ChipCardView: NSView, NSDraggingSource {
     static let dragType = NSPasteboard.PasteboardType("com.contexthud.chip")
     let index: Int
@@ -157,10 +19,9 @@ final class ChipCardView: NSView, NSDraggingSource {
         wantsLayer = true
         layer?.cornerRadius = 10
         layer?.cornerCurve = .continuous
-        layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.85).cgColor
-        layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.55).cgColor
         layer?.borderWidth = 1
         translatesAutoresizingMaskIntoConstraints = false
+        applyAppearance()
 
         handle.font = NSFont.systemFont(ofSize: 16, weight: .regular)
         handle.textColor = .tertiaryLabelColor
@@ -199,6 +60,17 @@ final class ChipCardView: NSView, NSDraggingSource {
     override func resetCursorRects() {
         super.resetCursorRects()
         addCursorRect(bounds, cursor: .openHand)
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyAppearance()
+    }
+
+    private func applyAppearance() {
+        NSAppearance.current = effectiveAppearance
+        layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.85).cgColor
+        layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.55).cgColor
     }
 
     @objc private func checkboxToggled(_ sender: NSButton) {
@@ -352,7 +224,7 @@ final class TitlePreviewView: NSView {
         wantsLayer = true
         layer?.cornerRadius = 8
         layer?.cornerCurve = .continuous
-        layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.7).cgColor
+        applyAppearance()
 
         label.translatesAutoresizingMaskIntoConstraints = false
         label.lineBreakMode = .byTruncatingTail
@@ -395,6 +267,16 @@ final class TitlePreviewView: NSView {
             }
         }
         label.attributedStringValue = s
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyAppearance()
+    }
+
+    private func applyAppearance() {
+        NSAppearance.current = effectiveAppearance
+        layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.7).cgColor
     }
 }
 

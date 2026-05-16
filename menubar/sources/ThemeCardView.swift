@@ -18,6 +18,10 @@ final class ThemeCardView: NSView {
         previewLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(previewLabel)
 
+        let swatchLabel = NSTextField(labelWithAttributedString: ThemeCardView.swatchString(theme))
+        swatchLabel.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(swatchLabel)
+
         let nameLabel = NSTextField(labelWithString: theme.name)
         nameLabel.font = NSFont.systemFont(ofSize: 11, weight: .medium)
         nameLabel.textColor = .secondaryLabelColor
@@ -25,9 +29,12 @@ final class ThemeCardView: NSView {
         addSubview(nameLabel)
 
         NSLayoutConstraint.activate([
-            previewLabel.topAnchor.constraint(equalTo: topAnchor, constant: 10),
+            previewLabel.topAnchor.constraint(equalTo: topAnchor, constant: 8),
             previewLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
-            previewLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            previewLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -10),
+            swatchLabel.topAnchor.constraint(equalTo: previewLabel.bottomAnchor, constant: 4),
+            swatchLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+            swatchLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -10),
             nameLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
             nameLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
         ])
@@ -35,7 +42,13 @@ final class ThemeCardView: NSView {
 
     required init?(coder: NSCoder) { fatalError() }
 
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
+    }
+
     override func draw(_ dirtyRect: NSRect) {
+        NSAppearance.current = effectiveAppearance
         let bg = isSelected
             ? NSColor.controlAccentColor.withAlphaComponent(0.15)
             : NSColor.controlBackgroundColor
@@ -64,14 +77,19 @@ final class ThemeCardView: NSView {
             .font: font,
             .foregroundColor: theme.projectColor,
         ]))
-        s.append(NSAttributedString(string: " · ", attributes: [
-            .font: font,
-            .foregroundColor: theme.separatorColor,
-        ]))
-        s.append(NSAttributedString(string: "85%", attributes: [
-            .font: font,
-            .foregroundColor: theme.pctHigh,
-        ]))
+        return s
+    }
+
+    /// Three threshold swatches painted in pctLow / pctMid / pctHigh so the
+    /// user sees how each tier renders before committing.
+    private static func swatchString(_ theme: Theme) -> NSAttributedString {
+        let font = NSFont.monospacedSystemFont(ofSize: 10.5, weight: .medium)
+        let s = NSMutableAttributedString()
+        s.append(NSAttributedString(string: "12%", attributes: [.font: font, .foregroundColor: theme.pctLow]))
+        s.append(NSAttributedString(string: "  ", attributes: [.font: font]))
+        s.append(NSAttributedString(string: "42%", attributes: [.font: font, .foregroundColor: theme.pctMid]))
+        s.append(NSAttributedString(string: "  ", attributes: [.font: font]))
+        s.append(NSAttributedString(string: "85%", attributes: [.font: font, .foregroundColor: theme.pctHigh]))
         return s
     }
 }

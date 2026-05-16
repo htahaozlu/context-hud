@@ -182,16 +182,17 @@ final class StatsViewController: PreferencePaneViewController {
     /// counts yesterday and earlier as a continuous run.
     private func currentStreak(_ snap: Snapshot) -> Int {
         var streak = 0
-        var sawActive = false
+        var leadingSkipped = false
         for d in snap.byDay {
             if d.tokens > 0 {
                 streak += 1
-                sawActive = true
-            } else if sawActive {
+                leadingSkipped = true
+            } else if !leadingSkipped {
+                leadingSkipped = true
+                continue
+            } else {
                 break
             }
-            // Leading empty days (today not used yet) are skipped so the
-            // streak keeps reflecting yesterday and earlier.
         }
         return streak
     }
@@ -426,7 +427,7 @@ final class HeatmapView: NSView {
         let newestWeekday = (cal.component(.weekday, from: newestDate) + 5) % 7 // Mon=0..Sun=6
 
         let maxTok = max(values.map(\.tokens).max() ?? 1, 1)
-        let accent = NSColor.systemOrange
+        let accent = ThemeStore.current.pctHigh
 
         for (i, v) in values.enumerated() {
             let offsetFromNewest = i

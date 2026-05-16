@@ -30,7 +30,7 @@ final class FlippedView: NSView {
 /// recent day to give an at-a-glance sense of recent burn vs trend.
 final class SparklineView: NSView {
     var values: [Double] = [] { didSet { needsDisplay = true } }
-    var tint: NSColor = .controlAccentColor
+    var tint: NSColor = ThemeStore.current.pctHigh { didSet { needsDisplay = true } }
 
     override var isFlipped: Bool { true }
     override var intrinsicContentSize: NSSize { NSSize(width: NSView.noIntrinsicMetric, height: 56) }
@@ -52,70 +52,6 @@ final class SparklineView: NSView {
     }
 }
 
-/// Custom NSView used inside an NSMenuItem to render a per-window limit row
-/// with a horizontal progress bar showing window-elapsed fraction.
-final class LimitRowView: NSView {
-    private let labelField = NSTextField(labelWithString: "")
-    private let pctField   = NSTextField(labelWithString: "")
-    private let resetField = NSTextField(labelWithString: "")
-    private let bar        = ProgressBarView()
-
-    override var intrinsicContentSize: NSSize { NSSize(width: 320, height: 38) }
-
-    init(label: String, percent: Double?, reset: String) {
-        super.init(frame: NSRect(x: 0, y: 0, width: 320, height: 38))
-
-        let pctText = percent.map { String(format: "%.0f%%", $0) } ?? "—"
-        let barValue = (percent ?? 0) / 100.0
-        let barColor: NSColor = {
-            guard let p = percent else { return .controlAccentColor }
-            if p >= 90 { return .systemRed }
-            if p >= 70 { return .systemOrange }
-            return .systemGreen
-        }()
-
-        labelField.stringValue = label
-        labelField.font = NSFont.menuFont(ofSize: NSFont.smallSystemFontSize)
-        labelField.textColor = .secondaryLabelColor
-        labelField.translatesAutoresizingMaskIntoConstraints = false
-
-        pctField.stringValue = pctText
-        pctField.font = NSFont.monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold)
-        pctField.textColor = barColor
-        pctField.translatesAutoresizingMaskIntoConstraints = false
-
-        resetField.stringValue = "↻ \(reset)"
-        resetField.font = NSFont.monospacedSystemFont(ofSize: NSFont.smallSystemFontSize - 1, weight: .regular)
-        resetField.textColor = .tertiaryLabelColor
-        resetField.alignment = .right
-        resetField.translatesAutoresizingMaskIntoConstraints = false
-
-        bar.value = barValue
-        bar.tint = barColor
-        bar.corner = 2
-        bar.translatesAutoresizingMaskIntoConstraints = false
-
-        addSubview(labelField); addSubview(pctField); addSubview(resetField); addSubview(bar)
-        NSLayoutConstraint.activate([
-            labelField.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 28),
-            labelField.topAnchor.constraint(equalTo: topAnchor, constant: 6),
-            labelField.widthAnchor.constraint(equalToConstant: 36),
-
-            pctField.leadingAnchor.constraint(equalTo: labelField.trailingAnchor, constant: 6),
-            pctField.firstBaselineAnchor.constraint(equalTo: labelField.firstBaselineAnchor),
-
-            resetField.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
-            resetField.firstBaselineAnchor.constraint(equalTo: labelField.firstBaselineAnchor),
-
-            bar.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 28),
-            bar.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
-            bar.topAnchor.constraint(equalTo: labelField.bottomAnchor, constant: 5),
-            bar.heightAnchor.constraint(equalToConstant: 4),
-        ])
-    }
-    required init?(coder: NSCoder) { fatalError() }
-}
-
 /// Stat tile — a small native card with a caption + big value. Used in the
 /// Usage tab to surface tokens / sessions / context % at a glance.
 final class StatTileView: NSView {
@@ -123,9 +59,8 @@ final class StatTileView: NSView {
         super.init(frame: .zero)
         wantsLayer = true
         layer?.cornerRadius = 8
-        layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
-        layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.5).cgColor
         layer?.borderWidth = 1
+        applyAppearance()
 
         let cap = NSTextField(labelWithString: caption.uppercased())
         cap.font = NSFont.systemFont(ofSize: 9, weight: .semibold)
@@ -154,6 +89,17 @@ final class StatTileView: NSView {
         ])
     }
     required init?(coder: NSCoder) { fatalError() }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyAppearance()
+    }
+
+    private func applyAppearance() {
+        NSAppearance.current = effectiveAppearance
+        layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+        layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.5).cgColor
+    }
 }
 
 /// Stat tile with caption + primary value + faded sub-value. Lets each tile
@@ -165,8 +111,8 @@ final class DualStatTileView: NSView {
         wantsLayer = true
         layer?.cornerRadius = 10
         layer?.cornerCurve = .continuous
-        layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.55).cgColor
         layer?.borderWidth = 0
+        applyAppearance()
 
         let cap = NSTextField(labelWithString: caption)
         cap.font = NSFont.systemFont(ofSize: 11, weight: .medium)
@@ -203,6 +149,16 @@ final class DualStatTileView: NSView {
         ])
     }
     required init?(coder: NSCoder) { fatalError() }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyAppearance()
+    }
+
+    private func applyAppearance() {
+        NSAppearance.current = effectiveAppearance
+        layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.55).cgColor
+    }
 }
 
 /// Native Usage panel — rebuilt per refresh from hud.json. One card per agent
