@@ -225,8 +225,11 @@ def fetch_claude_usage_api():
 
 
 def parse_usage_percent(value):
+    # Anthropic's `utilization` can transiently exceed 100% right before reset.
+    # Surface that overrun (capped at 200% to keep UI sane) instead of silently
+    # clamping to 100, which would hide the real state.
     if isinstance(value, (int, float)):
-        return round(max(0.0, min(100.0, float(value))), 1)
+        return round(max(0.0, min(200.0, float(value))), 1)
     return None
 
 
@@ -283,7 +286,7 @@ def build_active_sessions(per_session):
         last_input = int(s.get("last_input", 0) or 0)
         context_pct = None
         if window and last_input > 0:
-            context_pct = round(min(100.0, last_input / window * 100.0), 1)
+            context_pct = round(min(200.0, last_input / window * 100.0), 1)
         actives.append({
             "id": os.path.basename(path).rsplit(".", 1)[0],
             "tokens": s["tokens"],
@@ -304,14 +307,10 @@ def claude_context_window(model):
     if not model:
         return 200000
     m = model.lower()
+    # Only treat as 1M when the model tag explicitly opts in (`[1m]` / `-1m`).
+    # All current Claude models default to a 200K context window; the 1M beta
+    # requires an explicit header and is not implied by the model name alone.
     if "[1m]" in m or "-1m" in m:
-        return 1_000_000
-    if any(tag in m for tag in [
-        "claude-mythos",
-        "claude-opus-4-7",
-        "claude-opus-4-6",
-        "claude-sonnet-4-6",
-    ]):
         return 1_000_000
     return 200_000
 
@@ -486,8 +485,11 @@ def split_logical_sessions(per_session):
     """Split each file's events into sub-sessions on idle gaps.
 
     Returns (sessions, recent) where sessions feeds bucket_aggregates and
-    recent feeds recent_sessions. A "logical session" ends when the gap to
-    the next turn exceeds SESSION_IDLE_GAP (matches Claude's 5h reset).
+    recent feeds recent_sessions. A "logical session" ends when an event's
+    timestamp exceeds session_start + SESSION_IDLE_GAP — matching Claude's
+    5h window, which resets 5h after the *first* turn (not after the most
+    recent turn). This keeps historical splits consistent with the live
+    `session_5h_resets_at` math.
     """
     sessions = []
     recent = []
@@ -497,10 +499,12 @@ def split_logical_sessions(per_session):
             continue
         chunks = []
         cur = [events[0]]
-        for prev, nxt in zip(events, events[1:]):
-            if nxt[0] - prev[0] > SESSION_IDLE_GAP:
+        session_start = events[0][0]
+        for nxt in events[1:]:
+            if nxt[0] - session_start > SESSION_IDLE_GAP:
                 chunks.append(cur)
                 cur = [nxt]
+                session_start = nxt[0]
             else:
                 cur.append(nxt)
         chunks.append(cur)
@@ -534,6 +538,11 @@ def collect_claude():
     per_session = {}  # path -> {first_ts, last_ts, tokens, model, cwd}
     session_5h_oldest = None  # oldest turn ts within last 5h
     week_7d_oldest = None     # oldest turn ts within last 7d
+    # Tracks the most recent assistant turn from a *foreground* transcript
+    # (i.e. not a subagent). Used to pick last_context_pct so subagent
+    # transcripts with huge cache_read totals don't inflate the live %.
+    foreground_last = {"ts": 0.0, "data": None}
+    process_cwd = os.environ.get("PWD") or os.getcwd()
 
     for path in glob.glob(os.path.join(home, ".claude", "projects", "*", "*.jsonl")):
         try:
@@ -562,21 +571,37 @@ def collect_claude():
                     usage = msg.get("usage") or {}
                     if not isinstance(usage, dict):
                         continue
-                    # Per Anthropic docs total input = input_tokens +
-                    # cache_creation_input_tokens + cache_read_input_tokens
-                    # (all three count toward billing). For "tokens used"
-                    # displays we follow the ccusage / Claude Code convention
-                    # and sum input + cache_creation + output, omitting
-                    # cache_read so the same cached prefix isn't counted on
-                    # every turn (which would inflate totals 10-100×).
-                    # cache_read is still rolled into `inp` for context-window
-                    # % math because the model does see those tokens.
+                    # Billed-tokens view (matches Anthropic console / `/cost`):
+                    # total = input + cache_creation + cache_read + output.
+                    # All four count toward billing — cache_read at 0.1× input
+                    # rate, cache_creation at 1.25×. Earlier versions omitted
+                    # cache_read (ccusage's "fresh work" view) which made HUD
+                    # totals systematically undercount what Anthropic shows in
+                    # its own UI, often by 10-100× on cache-heavy sessions.
+                    # `inp` (context-window view) keeps the same three input
+                    # buckets — output isn't part of the live window.
                     fresh_in = int(usage.get("input_tokens", 0) or 0)
                     cache_create = int(usage.get("cache_creation_input_tokens", 0) or 0)
                     cache_read = int(usage.get("cache_read_input_tokens", 0) or 0)
                     outp = int(usage.get("output_tokens", 0) or 0)
+                    # Extended-thinking / reasoning output tokens. Anthropic
+                    # transcripts may surface these under varying keys; treat
+                    # any field whose name suggests thinking/reasoning output
+                    # as billable output (parallel to codex path).
+                    for k, v in usage.items():
+                        if not isinstance(v, (int, float)):
+                            continue
+                        kl = k.lower()
+                        if kl in ("input_tokens", "output_tokens",
+                                  "cache_creation_input_tokens",
+                                  "cache_read_input_tokens"):
+                            continue
+                        if (("thinking" in kl and "token" in kl)
+                                or kl == "reasoning_output_tokens"
+                                or kl == "output_thinking_tokens"):
+                            outp += int(v or 0)
                     inp = fresh_in + cache_create + cache_read  # context-window view
-                    total = fresh_in + cache_create + outp      # consumed view
+                    total = fresh_in + cache_create + cache_read + outp  # billed view
                     ts = parse_iso(obj.get("timestamp")) or mtime
                     age = NOW - ts
 
@@ -606,6 +631,16 @@ def collect_claude():
                         if session_5h_oldest is None or ts < session_5h_oldest:
                             session_5h_oldest = ts
 
+                    # Subagent transcripts (Task tool) link to a parent and
+                    # often carry huge cache_read totals that don't reflect
+                    # the foreground session's window fill. Skip them when
+                    # picking the "latest turn" for live context %.
+                    is_subagent = bool(
+                        obj.get("parentUuid")
+                        or obj.get("parent_tool_use_id")
+                        or msg.get("parentUuid")
+                        or msg.get("parent_tool_use_id")
+                    )
                     if ts > last_ts:
                         last_ts = ts
                         out["last_turn_input_tokens"] = inp
@@ -614,14 +649,19 @@ def collect_claude():
                         out["last_turn_at"] = obj.get("timestamp")
                         out["last_cwd"] = obj.get("cwd")
                         out["active_session_file"] = path
-                        window = claude_context_window(msg.get("model"))
-                        out["last_context_window"] = window
-                        raw_in = (
-                            int(usage.get("input_tokens", 0) or 0)
-                            + int(usage.get("cache_read_input_tokens", 0) or 0)
-                            + int(usage.get("cache_creation_input_tokens", 0) or 0)
-                        )
-                        out["last_context_pct"] = round(min(100.0, raw_in / window * 100.0), 2) if window else None
+
+                    if not is_subagent and ts > foreground_last["ts"]:
+                        foreground_last = {
+                            "ts": ts,
+                            "data": {
+                                "model": msg.get("model"),
+                                "cwd": obj.get("cwd"),
+                                "inp": inp,
+                                "outp": outp,
+                                "timestamp": obj.get("timestamp"),
+                                "path": path,
+                            },
+                        }
         except OSError:
             continue
 
@@ -632,6 +672,43 @@ def collect_claude():
             out["active_session_started_at"] = datetime.fromtimestamp(
                 s["first_ts"], tz=timezone.utc
             ).isoformat().replace("+00:00", "Z")
+
+    # Pick last_context_pct from the foreground transcript. Prefer a session
+    # whose cwd matches the process cwd (or $PWD); otherwise fall back to the
+    # most-recent non-subagent transcript captured above. The statusline
+    # snapshot (applied later) still wins when fresh.
+    fg = foreground_last["data"]
+    cwd_match = None
+    if process_cwd:
+        cwd_last_ts = 0.0
+        for path, s in per_session.items():
+            if s.get("cwd") == process_cwd and s.get("last_ts", 0) > cwd_last_ts:
+                cwd_last_ts = s["last_ts"]
+                cwd_match = (path, s)
+    if cwd_match:
+        path, s = cwd_match
+        model = s.get("model")
+        window = claude_context_window(model)
+        inp = int(s.get("last_input", 0) or 0)
+        out["last_model"] = model or out["last_model"]
+        out["last_cwd"] = s.get("cwd") or out["last_cwd"]
+        out["last_turn_input_tokens"] = inp
+        out["last_context_window"] = window
+        out["last_context_pct"] = (
+            round(min(200.0, inp / window * 100.0), 2) if window else None
+        )
+    elif fg:
+        window = claude_context_window(fg.get("model"))
+        inp = int(fg.get("inp", 0) or 0)
+        out["last_model"] = fg.get("model") or out["last_model"]
+        out["last_cwd"] = fg.get("cwd") or out["last_cwd"]
+        out["last_turn_input_tokens"] = inp
+        out["last_turn_output_tokens"] = int(fg.get("outp", 0) or 0)
+        out["last_turn_at"] = fg.get("timestamp") or out["last_turn_at"]
+        out["last_context_window"] = window
+        out["last_context_pct"] = (
+            round(min(200.0, inp / window * 100.0), 2) if window else None
+        )
 
     # Split each .jsonl into logical sessions on idle gaps > SESSION_IDLE_GAP
     # so a file left open across days doesn't show up as one giant session.
@@ -756,7 +833,7 @@ def collect_codex():
                         out["active_session_file"] = path
                         out["last_context_window"] = int(window) if window else None
                         if window:
-                            out["last_context_pct"] = round(min(100.0, inp / int(window) * 100.0), 2)
+                            out["last_context_pct"] = round(min(200.0, inp / int(window) * 100.0), 2)
         except OSError:
             continue
 
