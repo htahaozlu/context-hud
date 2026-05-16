@@ -148,16 +148,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     private func showFromReopen() {
-        // If the status item button has zero width or is off-screen the
-        // menubar entry is hidden — surface the detail window so the user
-        // can still reach settings.
+        // The status item button sits inside the menubar strip which is
+        // outside `visibleFrame` (visibleFrame excludes menubar+dock). Check
+        // against `frame` so a normally-visible button doesn't read as hidden.
         let button = statusItem.button
         let buttonHidden: Bool = {
             guard let btn = button, let win = btn.window else { return true }
             let frame = win.convertToScreen(btn.convert(btn.bounds, to: nil))
             guard let screen = NSScreen.screens.first(where: { $0.frame.contains(frame.origin) })
                 ?? NSScreen.main else { return frame.width < 4 }
-            return frame.width < 4 || !screen.visibleFrame.intersects(frame)
+            return frame.width < 4 || !screen.frame.intersects(frame)
         }()
         if buttonHidden {
             openDetail()
