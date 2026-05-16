@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, adapted for the current release workflow.
 
+## [0.3.7] - 2026-05-16
+
+### Changed
+
+- WidgetKit extension is no longer built by default. Source remains in `menubar/widget/Widget.swift` and the appex is wired into the build script behind `WIDGET_BUILD=1`, but `.appex` bundles produced by raw `swiftc` are silently refused by pluginkit even when Info.plist, embedded `__TEXT,__info_plist`, codesign, and notarization all match a working reference widget. The proper hand-off needs an Xcode subproject driven via `xcodebuild` so WidgetKit's hidden build-system requirements (auto-injected Swift stdlib, entitlements, plist embedding) are honored; tracked as the next milestone for the macOS companion.
+- README + README.tr updated to reflect the widget status accurately.
+
 ## [0.3.6] - 2026-05-16
 
 ### Added

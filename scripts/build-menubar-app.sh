@@ -94,32 +94,47 @@ lipo -create "$ENGINE_ARM64" "$ENGINE_X86_64" -output "$ENGINE_DST"
 chmod +x "$ENGINE_DST"
 cp "$USAGE_PY_SRC" "$USAGE_PY_DST"
 
-# Build WidgetKit extension (.appex) and embed under Contents/PlugIns. Widget
-# is a separate Mach-O linked against WidgetKit + SwiftUI. Min macOS 14 for
-# containerBackground; bundle still works on 13 via fallback view path but the
-# widget extension itself targets 14+ since WidgetKit on macOS is gated there
-# for third-party widgets.
-if [[ -d "$WIDGET_SRC_DIR" ]]; then
-  WIDGET_MIN="14.0"
+# WidgetKit extension is experimental and currently disabled — building
+# `.appex` via raw `swiftc` produces a binary that pluginkit silently refuses
+# to enumerate even when Info.plist, embedded __TEXT,__info_plist, codesign,
+# and notarization all check out (Stats-app comparison passes byte-for-byte
+# on the bundle structure). The proper fix is to add an Xcode subproject for
+# the widget and invoke `xcodebuild` here so the WidgetKit framework's hidden
+# build-system requirements (auto-injected Swift stdlib, entitlements, build
+# settings) are honored. Until then, opt-in via `WIDGET_BUILD=1`.
+if [[ "${WIDGET_BUILD:-0}" == "1" && -d "$WIDGET_SRC_DIR" ]]; then
+  WIDGET_MIN="13.0"
   mkdir -p "$WIDGET_APPEX/Contents/MacOS" "$WIDGET_APPEX/Contents/Resources"
   WIDGET_ARM64="$WIDGET_EXEC.arm64"
   WIDGET_X86_64="$WIDGET_EXEC.x86_64"
+  # Stage the Info.plist first so we can embed it into the Mach-O's
+  # __TEXT,__info_plist section — pluginkit verifies the embedded plist
+  # matches the on-disk one and silently refuses to register the extension
+  # when the embedded copy is missing.
+  cp "$WIDGET_PLIST_SRC" "$WIDGET_APPEX/Contents/Info.plist"
+  /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$WIDGET_APPEX/Contents/Info.plist"
+  /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$WIDGET_APPEX/Contents/Info.plist"
   xcrun --sdk macosx swiftc -O \
     -target "arm64-apple-macos${WIDGET_MIN}" \
     -framework WidgetKit -framework SwiftUI -framework AppKit \
     -application-extension -parse-as-library \
+    -Xlinker -e -Xlinker _NSExtensionMain \
+    -Xlinker -F -Xlinker /System/Library/PrivateFrameworks \
+    -Xlinker -framework -Xlinker PlugInKit \
+    -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker "$WIDGET_APPEX/Contents/Info.plist" \
     "$WIDGET_SRC_DIR"/*.swift -o "$WIDGET_ARM64"
   xcrun --sdk macosx swiftc -O \
     -target "x86_64-apple-macos${WIDGET_MIN}" \
     -framework WidgetKit -framework SwiftUI -framework AppKit \
     -application-extension -parse-as-library \
+    -Xlinker -e -Xlinker _NSExtensionMain \
+    -Xlinker -F -Xlinker /System/Library/PrivateFrameworks \
+    -Xlinker -framework -Xlinker PlugInKit \
+    -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker "$WIDGET_APPEX/Contents/Info.plist" \
     "$WIDGET_SRC_DIR"/*.swift -o "$WIDGET_X86_64"
   lipo -create "$WIDGET_ARM64" "$WIDGET_X86_64" -output "$WIDGET_EXEC"
   rm -f "$WIDGET_ARM64" "$WIDGET_X86_64"
   chmod +x "$WIDGET_EXEC"
-  cp "$WIDGET_PLIST_SRC" "$WIDGET_APPEX/Contents/Info.plist"
-  /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$WIDGET_APPEX/Contents/Info.plist"
-  /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$WIDGET_APPEX/Contents/Info.plist"
 fi
 
 # Strip quarantine / provenance xattrs that browsers leak into source files.

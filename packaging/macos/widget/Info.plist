@@ -22,6 +22,30 @@
     <string>1</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
+    <key>CFBundleSupportedPlatforms</key>
+    <array>
+        <string>MacOSX</string>
+    </array>
+    <key>DTPlatformName</key>
+    <string>macosx</string>
+    <key>DTSDKName</key>
+    <string>macosx14.0</string>
+    <key>DTPlatformVersion</key>
+    <string>14.0</string>
+    <key>DTPlatformBuild</key>
+    <string>23A344</string>
+    <key>DTSDKBuild</key>
+    <string>23A344</string>
+    <key>DTCompiler</key>
+    <string>com.apple.compilers.llvm.clang.1_0</string>
+    <key>DTXcode</key>
+    <string>1500</string>
+    <key>DTXcodeBuild</key>
+    <string>15A240d</string>
+    <key>BuildMachineOSBuild</key>
+    <string>23A344</string>
+    <key>TeamId</key>
+    <string>DQJT5BCZCM</string>
     <key>NSExtension</key>
     <dict>
         <key>NSExtensionPointIdentifier</key>

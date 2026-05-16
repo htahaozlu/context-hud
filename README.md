@@ -139,13 +139,13 @@ The companion app reads `~/.context-hud/hud.json` and provides:
   theme and the menubar title repaints in that palette before you commit
 - a full Settings window with Usage, Appearance, Menubar, and About tabs
 - per-session context percentage for parallel Claude / Codex sessions
-- a Notification Center / desktop widget (small, medium, large) showing the
-  active agent, project, context ring, and 5h/7d limit bars — kept in sync
-  with the menubar via `WidgetCenter` reloads on every regeneration
 
-The widget reads the same `~/.context-hud/hud.json` snapshot, so the menubar
-title and the widget never disagree. To add it, open Notification Center →
-"Edit Widgets" → search "ContextHUD" and pick a size.
+A Notification Center / desktop widget (small, medium, large) is wired up in
+`menubar/widget/Widget.swift` and ready to ship, but bundling it requires an
+Xcode subproject — building widget extensions with raw `swiftc` produces an
+`.appex` that pluginkit silently refuses to enumerate. The build-script flag
+`WIDGET_BUILD=1` opts into the experimental swiftc path; the proper Xcode
+hand-off is tracked as the next milestone for the macOS companion.
 
 If the menubar icon is hidden by overflow (Bartender, Hidden Bar, or a
 crowded menubar), launching ContextHUD again from Finder / Spotlight opens

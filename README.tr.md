@@ -131,13 +131,12 @@ Yardımcı uygulama `~/.context-hud/hud.json` dosyasını okur ve şunları sağ
   üzerinde gezinirken menubar başlığı o paletle yeniden çizilir
 - Kullanım, Görünüm, Menubar ve Hakkında sekmeleri olan tam Ayarlar penceresi
 - paralel Claude / Codex oturumları için per-session bağlam yüzdesi
-- Bildirim Merkezi / masaüstü widget'ı (küçük, orta, büyük): aktif ajan,
-  proje, bağlam halkası ve 5sa/7g limit barları — her yeniden üretimde
-  `WidgetCenter` ile senkronize tutulur
 
-Widget aynı `~/.context-hud/hud.json` anlık görüntüsünü okur; menubar
-başlığı ile widget asla farklı veri göstermez. Eklemek için Bildirim
-Merkezi → "Widget'ları Düzenle" → "ContextHUD" arayıp boyut seçin.
+Bildirim Merkezi / masaüstü widget'ı (küçük, orta, büyük) `menubar/widget/
+Widget.swift` içinde hazır; ancak paketlemek bir Xcode alt projesi gerektirir
+— ham `swiftc` ile derlenen `.appex` pluginkit tarafından sessizce reddediliyor.
+Build script bayrağı `WIDGET_BUILD=1` deneysel swiftc yolunu açar; düzgün
+Xcode entegrasyonu macOS yardımcısının sıradaki kilometre taşı.
 
 Menubar simgesi taşma nedeniyle gizlenirse (Bartender, Hidden Bar veya
 kalabalık menubar), uygulamayı Finder / Spotlight'tan tekrar açtığınızda
