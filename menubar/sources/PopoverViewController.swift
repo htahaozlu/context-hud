@@ -6,6 +6,10 @@ final class MenubarPopoverViewController: NSViewController, NSMenuDelegate {
     private let hPad: CGFloat = Spacing.m
     private let vGap: CGFloat = Spacing.s
     private var didShowOnce = false
+    /// SHA-ish fingerprint of the snapshot the last rebuild rendered. When the
+    /// next refresh tick computes the same fingerprint we skip the teardown to
+    /// stop the popover from flashing on every 10s tick.
+    private var lastSnapshotKey: String?
 
     var onOpenSettings: (() -> Void)?
     var onRefresh: (() -> Void)?
@@ -34,6 +38,10 @@ final class MenubarPopoverViewController: NSViewController, NSMenuDelegate {
         contentStack.orientation = .vertical
         contentStack.alignment = .leading
         contentStack.spacing = Spacing.s
+        // All four edges equalized — top/bottom carry the full Spacing.m and
+        // leading/trailing get the remainder via `addCard()` so every visible
+        // gap around the cards is 16pt. Previously top/bottom were 16 while
+        // L/R were only 12, which read as a top/right whitespace bias.
         contentStack.edgeInsets = NSEdgeInsets(top: Spacing.m, left: 0, bottom: Spacing.m, right: 0)
         contentStack.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(contentStack)
@@ -53,17 +61,29 @@ final class MenubarPopoverViewController: NSViewController, NSMenuDelegate {
     }
 
     func rebuild() {
-        contentStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
-
         let hud = Hud()
         let (active, all, others) = hud.load()
         let primary = active ?? all.first
+        let key = snapshotKey(active: active, primary: primary, others: others)
+        // Bail early when nothing the popover renders has changed — this is
+        // the cheapest fix for the 10s tick flicker (no teardown, no relayout).
+        if key == lastSnapshotKey, !contentStack.arrangedSubviews.isEmpty {
+            return
+        }
+        lastSnapshotKey = key
+
+        // Suppress implicit CAAnimations so the rebuild swap doesn't crossfade
+        // sublayers — that was the source of the visible flash when the active
+        // sessions array changed shape between ticks.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        contentStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
 
         if let agent = primary {
             addCard(buildHero(agent: agent, isActive: agent.name == active?.name))
             addCard(buildStatRow(agent: agent))
             if agent.activeSessions.count > 1 {
-                addCard(buildConcurrentSessions(agent: agent))
+                addCard(buildParallelSessions(agent: agent))
             }
         } else {
             addCard(buildEmptyState())
@@ -74,6 +94,7 @@ final class MenubarPopoverViewController: NSViewController, NSMenuDelegate {
         addCard(buildFooter())
 
         view.layoutSubtreeIfNeeded()
+        CATransaction.commit()
         let fit = view.fittingSize
         preferredContentSize = NSSize(
             width: Self.contentWidth,
@@ -102,8 +123,8 @@ final class MenubarPopoverViewController: NSViewController, NSMenuDelegate {
         v.setContentCompressionResistancePriority(.required, for: .vertical)
         contentStack.addArrangedSubview(v)
         NSLayoutConstraint.activate([
-            v.leadingAnchor.constraint(equalTo: contentStack.leadingAnchor, constant: Spacing.s),
-            v.trailingAnchor.constraint(equalTo: contentStack.trailingAnchor, constant: -Spacing.s),
+            v.leadingAnchor.constraint(equalTo: contentStack.leadingAnchor, constant: Spacing.m),
+            v.trailingAnchor.constraint(equalTo: contentStack.trailingAnchor, constant: -Spacing.m),
         ])
     }
 
@@ -414,48 +435,133 @@ final class MenubarPopoverViewController: NSViewController, NSMenuDelegate {
         return row
     }
 
-    private func buildConcurrentSessions(agent a: Agent) -> NSView {
+    /// "Parallel Sessions" card — one row per concurrent Claude/Codex session
+    /// other than the hero (foreground) one. Each row shows the project name +
+    /// model on top, a thin context-percent bar underneath, the percent text +
+    /// last-turn relative time on the right. Capped at 5 rows; a "+N more"
+    /// footer appears if exceeded. Caller is responsible for only invoking
+    /// this when `agent.activeSessions.count > 1`.
+    private func buildParallelSessions(agent a: Agent) -> NSView {
         let (container, stack) = sectionContainer()
-        stack.spacing = 4
+        stack.spacing = Spacing.xs
 
-        let header = NSTextField(labelWithString: L10n.text("Parallel sessions", "Paralel oturumlar"))
-        header.font = NSFont.systemFont(ofSize: 11, weight: .medium)
-        header.textColor = .secondaryLabelColor
+        let header = NSTextField(labelWithAttributedString:
+            Typography.captionAttributed(L10n.text("Parallel Sessions", "Paralel oturumlar")))
         stack.addArrangedSubview(header)
 
-        let topId = a.activeSessions.first?.id
-        for sess in a.activeSessions where sess.id != topId {
-            let proj = NSTextField(labelWithString: sess.project)
-            proj.font = NSFont.systemFont(ofSize: 12)
-            proj.textColor = .labelColor
-            proj.lineBreakMode = .byTruncatingMiddle
+        // Distinguish the foreground session by matching its cwd against the
+        // agent.cwd (last_cwd). Falls back to "first active session" if no cwd
+        // is set, so the popover still shows N-1 rows in that degenerate case.
+        let foregroundCwd = a.cwd
+        let allOthers = a.activeSessions.filter { sess in
+            if let fg = foregroundCwd, !fg.isEmpty {
+                let proj = (fg as NSString).lastPathComponent
+                return sess.project != proj
+            }
+            return sess.id != a.activeSessions.first?.id
+        }
+        let cap = 5
+        let shown = Array(allOthers.prefix(cap))
+        let overflow = max(0, allOthers.count - cap)
 
-            let pctStr = sess.ctxPct.map { String(format: "%.0f%%", $0) } ?? "—"
-            let pct = NSTextField(labelWithString: pctStr)
-            pct.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .semibold)
-            pct.textColor = Hud.ctxColor(sess.ctxPct)
+        for sess in shown {
+            stack.addArrangedSubview(makeParallelSessionRow(sess))
+            stack.arrangedSubviews.last?.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        }
 
-            let when = sess.lastTurn.map { Hud.relative($0) } ?? "—"
-            let whenLbl = NSTextField(labelWithString: when)
-            whenLbl.font = NSFont.systemFont(ofSize: 10)
-            whenLbl.textColor = .tertiaryLabelColor
-
-            let right = NSStackView(views: [pct, whenLbl])
-            right.orientation = .horizontal
-            right.alignment = .firstBaseline
-            right.spacing = 8
-
-            let sp = NSView()
-            sp.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
-            let r = NSStackView(views: [proj, sp, right])
-            r.orientation = .horizontal
-            r.alignment = .firstBaseline
-            r.distribution = .fill
-            r.spacing = 6
-            stack.addArrangedSubview(r)
-            r.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        if overflow > 0 {
+            let more = NSTextField(labelWithString: L10n.text("+ \(overflow) more", "+ \(overflow) daha"))
+            more.font = NSFont.systemFont(ofSize: 10, weight: .regular)
+            more.textColor = .tertiaryLabelColor
+            stack.addArrangedSubview(more)
         }
         return container
+    }
+
+    /// Single row inside the parallel-sessions card: project · model on top
+    /// row, capsule progress bar + percent + last-turn time below.
+    private func makeParallelSessionRow(_ sess: ActiveSession) -> NSView {
+        let proj = NSTextField(labelWithString: sess.project)
+        proj.font = NSFont.systemFont(ofSize: 12, weight: .medium)
+        proj.textColor = .labelColor
+        proj.lineBreakMode = .byTruncatingMiddle
+        proj.cell?.usesSingleLineMode = true
+        proj.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        var metaParts: [String] = []
+        if let m = sess.model { metaParts.append(m) }
+        if let t = sess.lastTurn { metaParts.append(Hud.relative(t)) }
+        let meta = NSTextField(labelWithString: metaParts.joined(separator: " · "))
+        meta.font = NSFont.systemFont(ofSize: 10, weight: .regular)
+        meta.textColor = .tertiaryLabelColor
+        meta.lineBreakMode = .byTruncatingTail
+        meta.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        let pctStr = sess.ctxPct.map { String(format: "%.0f%%", $0) } ?? "—"
+        let pctLbl = NSTextField(labelWithString: pctStr)
+        pctLbl.font = Typography.bodyMono(11, weight: .semibold)
+        pctLbl.textColor = Hud.ctxColor(sess.ctxPct)
+        pctLbl.setContentHuggingPriority(.required, for: .horizontal)
+
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+        let topRow = NSStackView(views: [proj, spacer, pctLbl])
+        topRow.orientation = .horizontal
+        topRow.alignment = .firstBaseline
+        topRow.distribution = .fill
+        topRow.spacing = Spacing.xs
+
+        let bar = ProgressBarView()
+        if let p = sess.ctxPct {
+            bar.value = max(0, min(1, p / 100.0))
+        } else {
+            bar.value = 0
+        }
+        bar.tint = ThemeStore.current.accent
+        bar.gradientEnd = ThemeStore.current.pctMid
+        bar.corner = 2
+        bar.translatesAutoresizingMaskIntoConstraints = false
+
+        let stack = NSStackView(views: [topRow, bar, meta])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 3
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        topRow.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        bar.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        bar.heightAnchor.constraint(equalToConstant: 4).isActive = true
+        return stack
+    }
+
+    /// Fingerprint of the data the popover actually renders. Two consecutive
+    /// refreshes producing the same key skip the rebuild entirely so the
+    /// popover doesn't tear down + re-add its cards on every 10s tick.
+    private func snapshotKey(active: Agent?, primary: Agent?, others: [ToolSummary]) -> String {
+        var parts: [String] = []
+        parts.append(active?.name ?? "-")
+        if let p = primary {
+            parts.append(p.name)
+            parts.append(p.project)
+            parts.append(p.model ?? "-")
+            parts.append(p.ctxPct.map { String(format: "%.1f", $0) } ?? "-")
+            parts.append(p.ctxWindow.map(String.init) ?? "-")
+            parts.append(String(p.activeSession))
+            parts.append(String(p.session5h))
+            parts.append(p.session5hPercent.map { String(format: "%.1f", $0) } ?? "-")
+            parts.append(String(p.week7d))
+            parts.append(p.week7dPercent.map { String(format: "%.1f", $0) } ?? "-")
+            parts.append(p.lastTurn.map { String(Int($0.timeIntervalSince1970)) } ?? "-")
+            parts.append(p.sessionStarted.map { String(Int($0.timeIntervalSince1970)) } ?? "-")
+            for s in p.activeSessions {
+                parts.append("S:\(s.id)|\(s.project)|\(s.model ?? "-")|\(s.ctxPct.map { String(format: "%.1f", $0) } ?? "-")|\(s.tokens)|\(s.lastTurn.map { String(Int($0.timeIntervalSince1970)) } ?? "-")")
+            }
+        }
+        for t in others {
+            parts.append("O:\(t.name)|\(t.tokens7d)|\(t.sessions7d)|\(t.lastModel ?? "-")")
+        }
+        parts.append("T:\(ThemeStore.current.id)")
+        parts.append("L:\(L10n.lang.rawValue)")
+        return parts.joined(separator: "\u{1F}")
     }
 
     private func buildOthers(tools: [ToolSummary]) -> NSView {
