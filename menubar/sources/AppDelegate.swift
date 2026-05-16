@@ -16,7 +16,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var fsStream: FSEventStreamRef?
     private var fsDebounce: DispatchWorkItem?
     private var fsRunning = false
+    /// Paths currently fed to FSEventStreamCreate. FSEvents captures the
+    /// path set at creation — when ~/.claude/projects or ~/.codex/sessions
+    /// materializes after launch we need to tear down and recreate the
+    /// stream against the new union, otherwise the new agent stays invisible
+    /// until restart.
+    private var fsWatchedPaths: Set<String> = []
     private var popoverVisible = false
+    private var lastAllAgents: [Agent] = []
+    private var engineRunning = false
+    private var enginePending = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -67,6 +76,67 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         RunLoop.main.add(timer, forMode: .common)
 
         startAgentDirWatcher()
+        registerSystemObservers()
+        IncidentPoller.shared.start()
+    }
+
+    /// Hardens the status item against display reconfigure / sleep — common
+    /// failure mode in menubar apps where an external monitor unplug leaves
+    /// the status button orphaned with no rendering surface. Also redraws
+    /// the title when the incident poller reports a status change so the
+    /// overlay can light up between refresh ticks.
+    private func registerSystemObservers() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleScreenReconfigure),
+            name: NSApplication.didChangeScreenParametersNotification,
+            object: nil
+        )
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(handleWake),
+            name: NSWorkspace.didWakeNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleIncidentChange),
+            name: IncidentPoller.didChange,
+            object: nil
+        )
+    }
+
+    @objc private func handleScreenReconfigure() {
+        ensureStatusItemAlive()
+        repaintTitle()
+    }
+
+    @objc private func handleWake() {
+        ensureStatusItemAlive()
+        regenerateThenRefresh()
+        IncidentPoller.shared.pollNow()
+    }
+
+    @objc private func handleIncidentChange() {
+        repaintTitle()
+        if popover.isShown { popoverVC.rebuild() }
+    }
+
+    /// Recreates the status item when its button is missing or its window has
+    /// been orphaned by a display reconfigure. Idempotent — safe to call from
+    /// any observer.
+    private func ensureStatusItemAlive() {
+        let alive: Bool = {
+            guard let btn = statusItem?.button else { return false }
+            return btn.window != nil
+        }()
+        if alive { return }
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        if let button = statusItem.button {
+            button.target = self
+            button.action = #selector(togglePopover(_:))
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        }
     }
 
     /// Watches the agent transcript directories so the menubar reflects the
@@ -75,10 +145,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     /// one regenerate.
     private func startAgentDirWatcher() {
         let home = NSHomeDirectory()
-        let paths = [
+        let candidates = [
             "\(home)/.claude/projects",
             "\(home)/.codex/sessions",
-        ].filter { FileManager.default.fileExists(atPath: $0) }
+        ]
+        let paths = candidates.filter { FileManager.default.fileExists(atPath: $0) }
         guard !paths.isEmpty else { return }
 
         var context = FSEventStreamContext(
@@ -107,10 +178,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         if FSEventStreamStart(stream) {
             fsStream = stream
             fsRunning = true
+            fsWatchedPaths = Set(paths)
         } else {
             FSEventStreamInvalidate(stream)
             FSEventStreamRelease(stream)
         }
+    }
+
+    /// Rescan agent transcript dirs and, if a new one materialized since
+    /// startup (e.g. user just installed the Codex CLI), tear down and
+    /// recreate the FSEventStream against the expanded path set. FSEvents
+    /// captures paths at creation and offers no in-place add.
+    private func rescanAgentDirsIfNeeded() {
+        let home = NSHomeDirectory()
+        let existing: Set<String> = [
+            "\(home)/.claude/projects",
+            "\(home)/.codex/sessions",
+        ].filter { FileManager.default.fileExists(atPath: $0) }
+            .reduce(into: Set<String>()) { $0.insert($1) }
+        if existing == fsWatchedPaths { return }
+        if let s = fsStream {
+            FSEventStreamStop(s)
+            FSEventStreamInvalidate(s)
+            FSEventStreamRelease(s)
+            fsStream = nil
+            fsRunning = false
+            fsWatchedPaths = []
+        }
+        startAgentDirWatcher()
     }
 
     private func fsEventFired() {
@@ -128,6 +223,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         // both closed. Engine is fast (sub-100ms in steady state) and this
         // closes a UX gap where switching projects in another Claude session
         // left the menubar showing the old project until the popover opened.
+        rescanAgentDirsIfNeeded()
         regenerateThenRefresh()
     }
 
@@ -177,11 +273,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     /// (e.g. running the Swift app standalone in dev), we still refresh from the
     /// existing JSON so behavior degrades gracefully to the previous mode.
     func regenerateThenRefresh() {
+        // Reentrancy guard: if an engine run is already in flight, just mark
+        // pending so we coalesce overlapping ticks (FSEvents burst + 10s timer
+        // + wake-from-sleep) into at most one follow-up run. Without this two
+        // engine processes can stomp on hud.json simultaneously.
+        if engineRunning {
+            enginePending = true
+            return
+        }
+        engineRunning = true
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             self?.runEngine()
             DispatchQueue.main.async {
-                self?.refresh()
-                self?.reloadWidgets()
+                guard let self else { return }
+                self.refresh()
+                self.reloadWidgets()
+                self.engineRunning = false
+                if self.enginePending {
+                    self.enginePending = false
+                    self.regenerateThenRefresh()
+                }
             }
         }
     }
@@ -287,8 +398,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     func refresh() {
-        let (active, _, _) = hud.load()
+        let (active, all, _) = hud.load()
         lastActive = active
+        lastAllAgents = all
         repaintTitle()
         if popover.isShown {
             popoverVC.rebuild()
@@ -306,17 +418,78 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     /// Builds the compact menubar title using the active theme:
     ///     <Agent> <sep> <project> <sep> <ctx%>
     private func composeTitle(active: Agent?, theme: Theme = ThemeStore.current) -> NSAttributedString {
+        let font = NSFont.menuBarFont(ofSize: 0)
         guard let a = active else {
             return NSAttributedString(string: L10n.text(" no agent", " ajan yok"),
-                                      attributes: [.foregroundColor: NSColor.secondaryLabelColor])
+                                      attributes: [
+                                          .font: font,
+                                          .foregroundColor: NSColor.secondaryLabelColor,
+                                      ])
         }
-        return styleTitle(
+        let base = styleTitle(
             agent: a.name,
             project: a.project,
             pct: a.ctxPct,
             theme: theme,
-            font: NSFont.menuBarFont(ofSize: 0)
+            font: font
         )
+        let result = NSMutableAttributedString(attributedString: base)
+        if let prefix = incidentPrefix(font: font) {
+            result.insert(prefix, at: 0)
+        }
+        if let suffix = criticalBackgroundSuffix(font: font, theme: theme) {
+            result.append(suffix)
+        }
+        return result
+    }
+
+    /// Builds a leading "● " glyph colored by the active incident severity.
+    /// Returns nil when no incident is active or the user disabled the poller.
+    private func incidentPrefix(font: NSFont) -> NSAttributedString? {
+        guard DisplayPrefs.incidents else { return nil }
+        let state = IncidentPoller.shared.current
+        guard state.severity != .none else { return nil }
+        let color: NSColor
+        switch state.severity {
+        case .critical: color = .systemRed
+        case .major: color = .systemOrange
+        case .minor: color = .systemYellow
+        case .none: return nil
+        }
+        return NSAttributedString(string: "● ", attributes: [
+            .font: font,
+            .foregroundColor: color,
+        ])
+    }
+
+    /// Surfaces a high-pressure background session when the foreground is
+    /// calm. Suppressed when foreground itself is already > 50% (the user is
+    /// already seeing the warning color on the main pct field).
+    private func criticalBackgroundSuffix(font: NSFont, theme: Theme) -> NSAttributedString? {
+        guard DisplayPrefs.criticalBackground else { return nil }
+        guard let fg = lastActive, (fg.ctxPct ?? 0) < 50 else { return nil }
+        // Look across every agent's parallel sessions and find the highest
+        // non-foreground pct. Threshold: 80%.
+        var hottest: ActiveSession?
+        var hottestPct: Double = 0
+        let foregroundProject = fg.project
+        for ag in lastAllAgents {
+            for sess in ag.activeSessions {
+                guard sess.project != foregroundProject else { continue }
+                let pct = sess.ctxPct ?? 0
+                if pct > hottestPct, pct >= 80 {
+                    hottest = sess
+                    hottestPct = pct
+                }
+            }
+        }
+        guard let h = hottest else { return nil }
+        let pctStr = String(format: "%.0f%%", hottestPct)
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: theme.ctxColor(hottestPct),
+        ]
+        return NSAttributedString(string: "  ⚠ \(h.project) \(pctStr)", attributes: attrs)
     }
 
     private func styleTitle(

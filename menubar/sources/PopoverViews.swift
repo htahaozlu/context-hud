@@ -188,6 +188,7 @@ final class FooterIconButton: NSButton {
             self.image = img
         }
         self.contentTintColor = .secondaryLabelColor
+        self.setAccessibilityLabel(tooltip)
         self.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
             self.widthAnchor.constraint(equalToConstant: 30),

@@ -35,7 +35,7 @@ final class Hud {
             return ToolSummary(
                 name: name,
                 sessions7d: obj["sessions_7d"] as? Int ?? 0,
-                tokens7d: (obj["tokens_7d"] as? UInt64) ?? UInt64(obj["tokens_7d"] as? Int ?? 0),
+                tokens7d: u64(obj["tokens_7d"]),
                 lastUsed: obj["last_used"] as? String,
                 lastModel: obj["last_model"] as? String
             )
@@ -51,6 +51,36 @@ final class Hud {
             return nil
         }
         return payload
+    }
+
+    /// Coerce a JSON value (NSNumber or numeric string) into UInt64. Handles
+    /// the JSONSerialization quirk where small ints come back as `Int` but
+    /// large counts (≥ 2^63) come back as `Double` inside an NSNumber.
+    private func u64(_ v: Any?) -> UInt64 {
+        guard let v else { return 0 }
+        if let n = v as? UInt64 { return n }
+        if let n = v as? Int64, n >= 0 { return UInt64(n) }
+        if let n = v as? Int, n >= 0 { return UInt64(n) }
+        if let d = v as? Double, d.isFinite, d >= 0 { return UInt64(d) }
+        if let num = v as? NSNumber { return num.uint64Value }
+        return 0
+    }
+
+    private func u64Opt(_ v: Any?) -> UInt64? {
+        guard let v, !(v is NSNull) else { return nil }
+        if let n = v as? UInt64 { return n }
+        if let n = v as? Int64, n >= 0 { return UInt64(n) }
+        if let n = v as? Int, n >= 0 { return UInt64(n) }
+        if let d = v as? Double, d.isFinite, d >= 0 { return UInt64(d) }
+        if let num = v as? NSNumber { return num.uint64Value }
+        return nil
+    }
+
+    private func dbl(_ v: Any?) -> Double? {
+        guard let v, !(v is NSNull) else { return nil }
+        if let d = v as? Double { return d }
+        if let n = v as? NSNumber { return n.doubleValue }
+        return nil
     }
 
     private func parse(_ raw: [String: Any]?, name: String, overlay: [String: Any]? = nil) -> Agent? {
@@ -77,12 +107,12 @@ final class Hud {
             let st: Date? = startedRaw.flatMap { iso.date(from: $0) ?? isoNoFrac.date(from: $0) }
             return ActiveSession(
                 id: id,
-                tokens: (obj["tokens"] as? UInt64) ?? UInt64(obj["tokens"] as? Int ?? 0),
+                tokens: u64(obj["tokens"]),
                 project: (obj["project"] as? String) ?? "—",
                 model: obj["model"] as? String,
                 lastTurn: last,
                 started: st,
-                ctxPct: obj["context_pct"] as? Double
+                ctxPct: dbl(obj["context_pct"])
             )
         }
 
@@ -96,19 +126,19 @@ final class Hud {
 
         return Agent(
             name: name,
-            session5h: (raw["session_5h_tokens"] as? UInt64) ?? UInt64(raw["session_5h_tokens"] as? Int ?? 0),
-            session5hPercent: (raw["session_5h_percent"] as? Double)
-                ?? (fiveHourOverlay?["utilization"] as? Double)
-                ?? (fiveHourOverlay?["used_percentage"] as? Double),
-            week7d: (raw["week_7d_tokens"] as? UInt64) ?? UInt64(raw["week_7d_tokens"] as? Int ?? 0),
-            week7dPercent: (raw["week_7d_percent"] as? Double)
-                ?? (sevenDayOverlay?["utilization"] as? Double)
-                ?? (sevenDayOverlay?["used_percentage"] as? Double),
-            activeSession: (raw["active_session_tokens"] as? UInt64) ?? UInt64(raw["active_session_tokens"] as? Int ?? 0),
+            session5h: u64(raw["session_5h_tokens"]),
+            session5hPercent: dbl(raw["session_5h_percent"])
+                ?? dbl(fiveHourOverlay?["utilization"])
+                ?? dbl(fiveHourOverlay?["used_percentage"]),
+            week7d: u64(raw["week_7d_tokens"]),
+            week7dPercent: dbl(raw["week_7d_percent"])
+                ?? dbl(sevenDayOverlay?["utilization"])
+                ?? dbl(sevenDayOverlay?["used_percentage"]),
+            activeSession: u64(raw["active_session_tokens"]),
             model: raw["last_model"] as? String,
             cwd: raw["last_cwd"] as? String,
-            ctxPct: raw["last_context_pct"] as? Double,
-            ctxWindow: (raw["last_context_window"] as? UInt64) ?? (raw["last_context_window"] as? Int).map(UInt64.init),
+            ctxPct: dbl(raw["last_context_pct"]),
+            ctxWindow: u64Opt(raw["last_context_window"]),
             lastTurn: ts,
             sessionStarted: started,
             activeSessions: actives,
@@ -117,6 +147,66 @@ final class Hud {
             week7dResetsAt: parseDate(raw["week_7d_resets_at"] as? String)
                 ?? parseDate(sevenDayOverlay?["resets_at"] as? String)
         )
+    }
+
+    /// Formats a reset date according to the user's display preference.
+    /// `.relative` → "1h 47m"; `.absolute` → "14:32" (or "May 17, 14:32" if
+    /// reset is more than 24h out so the user knows it's not today).
+    static func resetsText(_ date: Date?) -> String {
+        switch DisplayPrefs.resetStyle {
+        case .relative: return resetsIn(date)
+        case .absolute: return resetsAt(date)
+        }
+    }
+
+    static func resetsAt(_ date: Date?) -> String {
+        guard let date else { return "—" }
+        let remaining = date.timeIntervalSinceNow
+        if remaining <= 0 { return L10n.text("ready", "hazır") }
+        let f = DateFormatter()
+        if remaining < 86400 {
+            f.dateFormat = "HH:mm"
+        } else {
+            f.dateStyle = .medium
+            f.timeStyle = .short
+        }
+        return f.string(from: date)
+    }
+
+    /// Linear extrapolation of when the active session will fill its context
+    /// window at current burn rate. Returns nil if we lack data, the session
+    /// is too short for a confident estimate, or token rate is non-positive.
+    /// Confidence gates: need ≥ 2 min elapsed and ≥ 5% pct change worth of
+    /// tokens since session start.
+    static func burnRate(_ a: Agent) -> (etaSeconds: TimeInterval, etaDate: Date)? {
+        guard let pct = a.ctxPct, pct > 0, pct < 100,
+              let start = a.sessionStarted,
+              let window = a.ctxWindow, window > 0 else { return nil }
+        let now = Date()
+        let elapsed = now.timeIntervalSince(start)
+        guard elapsed >= 120 else { return nil }
+        let used = Double(a.activeSession)
+        guard used > 0 else { return nil }
+        let rate = used / elapsed
+        guard rate > 0 else { return nil }
+        let remaining = Double(window) - used
+        guard remaining > 0 else { return nil }
+        let eta = remaining / rate
+        guard eta.isFinite, eta > 60 else { return nil }
+        return (eta, now.addingTimeInterval(eta))
+    }
+
+    /// Formats a burn-rate ETA as "in 1h 47m". Shorter than `resetsIn` —
+    /// suppresses leading "<1m" / day-units for the hero where space matters.
+    static func burnRateText(_ eta: TimeInterval) -> String {
+        let tr = L10n.lang == .tr
+        let hU = tr ? "sa" : "h"
+        let mU = tr ? "dk" : "m"
+        if eta < 60 { return "<1\(mU)" }
+        if eta < 3600 { return "\(Int(eta / 60))\(mU)" }
+        let h = Int(eta / 3600)
+        let m = (Int(eta) % 3600) / 60
+        return m == 0 ? "\(h)\(hU)" : "\(h)\(hU) \(m)\(mU)"
     }
 
     static func resetsIn(_ date: Date?) -> String {

@@ -7,6 +7,9 @@ final class DetailWindowController: NSWindowController, NSWindowDelegate {
     let statsVC = StatsViewController()
     private let appearanceVC = AppearanceSettingsViewController()
     private let menubarVC = MenubarSettingsViewController()
+    private let displayVC = DisplaySettingsViewController()
+    private let notificationsVC = NotificationSettingsViewController()
+    private let privacyVC = PrivacySettingsViewController()
     private let aboutVC = AboutViewController()
 
     init(onThemeChange: @escaping (String) -> Void) {
@@ -30,11 +33,23 @@ final class DetailWindowController: NSWindowController, NSWindowDelegate {
         menubarItem.label = L10n.text("Menubar", "Menubar")
         menubarItem.image = NSImage(systemSymbolName: "menubar.rectangle", accessibilityDescription: menubarItem.label)
 
+        let displayItem = NSTabViewItem(viewController: displayVC)
+        displayItem.label = L10n.text("Display", "Görüntü")
+        displayItem.image = NSImage(systemSymbolName: "slider.horizontal.below.rectangle", accessibilityDescription: displayItem.label)
+
+        let notificationsItem = NSTabViewItem(viewController: notificationsVC)
+        notificationsItem.label = L10n.text("Alerts", "Uyarılar")
+        notificationsItem.image = NSImage(systemSymbolName: "bell", accessibilityDescription: notificationsItem.label)
+
+        let privacyItem = NSTabViewItem(viewController: privacyVC)
+        privacyItem.label = L10n.text("Privacy", "Gizlilik")
+        privacyItem.image = NSImage(systemSymbolName: "hand.raised", accessibilityDescription: privacyItem.label)
+
         let aboutItem = NSTabViewItem(viewController: aboutVC)
         aboutItem.label = L10n.text("About", "Hakkında")
         aboutItem.image = NSImage(systemSymbolName: "info.circle", accessibilityDescription: aboutItem.label)
 
-        [usageItem, statsItem, appearanceItem, menubarItem, aboutItem].forEach(tabVC.addTabViewItem)
+        [usageItem, statsItem, appearanceItem, menubarItem, displayItem, notificationsItem, privacyItem, aboutItem].forEach(tabVC.addTabViewItem)
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 820, height: 680),
@@ -66,6 +81,9 @@ final class DetailWindowController: NSWindowController, NSWindowDelegate {
 
         appearanceVC.onThemeChange = onThemeChange
         menubarVC.onThemeChange = onThemeChange
+        displayVC.onChange = { onThemeChange(ThemeStore.current.id) }
+        notificationsVC.onChange = { onThemeChange(ThemeStore.current.id) }
+        privacyVC.onChange = { onThemeChange(ThemeStore.current.id) }
     }
     required init?(coder: NSCoder) { fatalError() }
 

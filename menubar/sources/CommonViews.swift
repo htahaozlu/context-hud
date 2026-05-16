@@ -10,6 +10,9 @@ final class ProgressBarView: NSView {
     var trackColor: NSColor = NSColor.tertiaryLabelColor.withAlphaComponent(0.18)
     var corner: CGFloat = 3
     var glow: Bool = false { didSet { needsDisplay = true } }
+    /// Threshold tick marks rendered as 1pt vertical lines, in `[0, 1]`.
+    /// Empty = no marks. Color follows ctx-color thresholds per mark.
+    var tickMarks: [Double] = [] { didSet { needsDisplay = true } }
 
     override var isFlipped: Bool { true }
 
@@ -50,6 +53,21 @@ final class ProgressBarView: NSView {
             fillPath.fill()
         }
         ctx.restoreGState()
+        if !tickMarks.isEmpty {
+            ctx.saveGState()
+            for raw in tickMarks {
+                let t = max(0, min(1, raw))
+                let x = bounds.width * CGFloat(t)
+                let pctValue = t * 100
+                let color: NSColor
+                if pctValue >= 90 { color = .systemRed }
+                else if pctValue >= 70 { color = .systemOrange }
+                else { color = NSColor.tertiaryLabelColor }
+                ctx.setFillColor(color.withAlphaComponent(0.85).cgColor)
+                ctx.fill(CGRect(x: x - 0.5, y: 0, width: 1, height: bounds.height))
+            }
+            ctx.restoreGState()
+        }
         if glow && !MotionPrefs.reduceTransparency {
             ctx.saveGState()
             ctx.setShadow(offset: .zero, blur: 6, color: tint.withAlphaComponent(0.55).cgColor)
@@ -262,6 +280,151 @@ final class DualStatTileView: NSView {
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         Surface.refreshCardColors(self)
+    }
+}
+
+// MARK: - LoadingStripeView
+
+/// Animated diagonal-stripe placeholder used while the engine is producing
+/// the first hud.json. Static gradient when reduce-motion is on.
+final class LoadingStripeView: NSView {
+    var tint: NSColor = ThemeStore.current.accent { didSet { needsDisplay = true } }
+    private var phase: CGFloat = 0
+    private var displayLink: CVDisplayLink?
+    /// Last CACurrentMediaTime() at which we hopped to main from the CV
+    /// callback. Accessed only on the CV display thread, so no lock.
+    private var lastFrameHop: CFTimeInterval = 0
+
+    override var isFlipped: Bool { true }
+    override var intrinsicContentSize: NSSize { NSSize(width: NSView.noIntrinsicMetric, height: 4) }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        setAccessibilityLabel("Loading")
+        startAnimating()
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    deinit { stopAnimating() }
+
+    private func startAnimating() {
+        guard !MotionPrefs.reduceMotion else { return }
+        var link: CVDisplayLink?
+        CVDisplayLinkCreateWithActiveCGDisplays(&link)
+        guard let link else { return }
+        CVDisplayLinkSetOutputCallback(link, { _, _, _, _, _, userInfo in
+            guard let userInfo else { return kCVReturnSuccess }
+            let view = Unmanaged<LoadingStripeView>.fromOpaque(userInfo).takeUnretainedValue()
+            // Throttle to ~30fps. CV display link fires at the panel's refresh
+            // rate (often 60–120 Hz). Hopping to main every frame saturates
+            // the run loop and shows up on Instruments as needless overhead
+            // while the loading state is on screen.
+            let now = CACurrentMediaTime()
+            if now - view.lastFrameHop < 0.033 { return kCVReturnSuccess }
+            view.lastFrameHop = now
+            DispatchQueue.main.async {
+                view.phase = (view.phase + 1.6).truncatingRemainder(dividingBy: 24)
+                view.needsDisplay = true
+            }
+            return kCVReturnSuccess
+        }, Unmanaged.passUnretained(self).toOpaque())
+        CVDisplayLinkStart(link)
+        displayLink = link
+    }
+
+    private func stopAnimating() {
+        if let link = displayLink {
+            CVDisplayLinkStop(link)
+        }
+        displayLink = nil
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let track = NSBezierPath(roundedRect: bounds, xRadius: 2, yRadius: 2)
+        NSColor.tertiaryLabelColor.withAlphaComponent(0.18).setFill()
+        track.fill()
+        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
+        ctx.saveGState()
+        track.addClip()
+        let stripeWidth: CGFloat = 12
+        let gap: CGFloat = 12
+        let step = stripeWidth + gap
+        var x: CGFloat = -bounds.height - step + phase
+        tint.withAlphaComponent(0.55).setFill()
+        while x < bounds.width + bounds.height {
+            let p = NSBezierPath()
+            p.move(to: NSPoint(x: x, y: 0))
+            p.line(to: NSPoint(x: x + stripeWidth, y: 0))
+            p.line(to: NSPoint(x: x + stripeWidth + bounds.height, y: bounds.height))
+            p.line(to: NSPoint(x: x + bounds.height, y: bounds.height))
+            p.close()
+            p.fill()
+            x += step
+        }
+        ctx.restoreGState()
+    }
+}
+
+// MARK: - IncidentBadgeView
+
+/// Inline incident strip used in the hero card meta row when upstream
+/// status pages report an active incident. Click opens the status URL.
+final class IncidentBadgeView: NSView {
+    var state: IncidentState = .none {
+        didSet {
+            rebuild()
+            isHidden = state.severity == .none
+        }
+    }
+    private let label = NSTextField(labelWithString: "")
+    private let dot = NSView()
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.cornerRadius = 6
+        layer?.cornerCurve = .continuous
+        translatesAutoresizingMaskIntoConstraints = false
+        dot.translatesAutoresizingMaskIntoConstraints = false
+        dot.wantsLayer = true
+        dot.layer?.cornerRadius = 3
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.font = NSFont.systemFont(ofSize: 10, weight: .medium)
+        label.textColor = .labelColor
+        label.lineBreakMode = .byTruncatingTail
+        addSubview(dot)
+        addSubview(label)
+        NSLayoutConstraint.activate([
+            dot.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
+            dot.centerYAnchor.constraint(equalTo: centerYAnchor),
+            dot.widthAnchor.constraint(equalToConstant: 6),
+            dot.heightAnchor.constraint(equalToConstant: 6),
+            label.leadingAnchor.constraint(equalTo: dot.trailingAnchor, constant: 6),
+            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
+            label.topAnchor.constraint(equalTo: topAnchor, constant: 3),
+            label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -3),
+        ])
+        isHidden = true
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    private func rebuild() {
+        let color: NSColor
+        switch state.severity {
+        case .critical: color = .systemRed
+        case .major: color = .systemOrange
+        case .minor: color = .systemYellow
+        case .none: color = .clear
+        }
+        dot.layer?.backgroundColor = color.cgColor
+        layer?.backgroundColor = color.withAlphaComponent(0.12).cgColor
+        label.stringValue = state.title
+        toolTip = state.url?.absoluteString
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        if let url = state.url { NSWorkspace.shared.open(url) }
     }
 }
 

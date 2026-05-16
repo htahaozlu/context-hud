@@ -34,6 +34,12 @@ pub struct ActiveSession {
     pub cwd: Option<String>,
     #[serde(default)]
     pub project: Option<String>,
+    #[serde(default)]
+    pub context_pct: Option<f64>,
+    #[serde(default)]
+    pub context_window: Option<u64>,
+    #[serde(default)]
+    pub last_input_tokens: u64,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -46,6 +52,12 @@ pub struct AgentUsage {
     pub week_7d_tokens: u64,
     #[serde(default)]
     pub week_7d_percent: Option<f64>,
+    #[serde(default)]
+    pub cache_read_tokens_5h: u64,
+    #[serde(default)]
+    pub cache_read_tokens_7d: u64,
+    #[serde(default)]
+    pub cache_read_tokens_30d: u64,
     #[serde(default)]
     pub active_session_tokens: u64,
     #[serde(default)]

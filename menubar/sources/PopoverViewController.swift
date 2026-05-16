@@ -94,7 +94,16 @@ final class MenubarPopoverViewController: NSViewController, NSMenuDelegate {
                 addCard(buildAgentLimits(ag))
             }
         } else {
-            addCard(buildEmptyState())
+            // Before the engine has produced a hud.json (first launch / cache
+            // miss after purge) show the loading stripe instead of the
+            // "no agent" empty state — the latter falsely implies the user has
+            // nothing running.
+            let hudExists = FileManager.default.fileExists(atPath: hud.path)
+            if hudExists {
+                addCard(buildEmptyState())
+            } else {
+                addCard(buildLoadingState())
+            }
         }
         if !others.isEmpty {
             addCard(buildOthers(tools: others))
@@ -158,6 +167,38 @@ final class MenubarPopoverViewController: NSViewController, NSMenuDelegate {
             stack.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -pad),
         ])
         return (card, stack)
+    }
+
+    private func buildLoadingState() -> NSView {
+        let (container, stack) = sectionContainer(hero: true)
+        stack.alignment = .leading
+        stack.spacing = Spacing.s
+
+        let title = NSTextField(labelWithString: L10n.text("Gathering session data…", "Oturum verileri toplanıyor…"))
+        title.font = Typography.title(14)
+        title.textColor = .labelColor
+
+        let sub = NSTextField(wrappingLabelWithString: L10n.text(
+            "Scanning Claude and Codex transcripts. This usually takes a second.",
+            "Claude ve Codex transcript'leri taranıyor. Genellikle bir saniye sürer."
+        ))
+        sub.font = Typography.body(11)
+        sub.textColor = .secondaryLabelColor
+        sub.maximumNumberOfLines = 0
+        sub.preferredMaxLayoutWidth = Self.contentWidth - 2 * hPad
+
+        let stripe = LoadingStripeView()
+        stripe.tint = ThemeStore.current.accent
+        stripe.translatesAutoresizingMaskIntoConstraints = false
+
+        stack.addArrangedSubview(title)
+        stack.addArrangedSubview(sub)
+        stack.addArrangedSubview(stripe)
+        title.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        sub.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        stripe.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        stripe.heightAnchor.constraint(equalToConstant: 4).isActive = true
+        return container
     }
 
     private func buildEmptyState() -> NSView {
@@ -269,7 +310,7 @@ final class MenubarPopoverViewController: NSViewController, NSMenuDelegate {
         if let t = a.lastTurn { metaParts.append(Hud.relative(t)) }
         let duration = Hud.formatDuration(a.sessionStarted, a.lastTurn)
         if duration != "—" {
-            metaParts.append(L10n.text("\(duration) running", "\(duration)"))
+            metaParts.append(L10n.text("\(duration) running", "\(duration) aktif"))
         }
         let metaText = metaParts.joined(separator: "  ·  ")
         let meta = NSTextField(labelWithString: metaText)
@@ -298,6 +339,7 @@ final class MenubarPopoverViewController: NSViewController, NSMenuDelegate {
         bar.gradientEnd = ThemeStore.current.pctMid
         bar.corner = 2
         bar.glow = (pct ?? 0) > 75
+        if DisplayPrefs.tickMarks { bar.tickMarks = [0.70, 0.90] }
         bar.translatesAutoresizingMaskIntoConstraints = false
         bar.setAccessibilityLabel(L10n.text("Context usage", "Bağlam kullanımı"))
 
@@ -318,6 +360,47 @@ final class MenubarPopoverViewController: NSViewController, NSMenuDelegate {
         stack.addArrangedSubview(detail)
         bar.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         bar.heightAnchor.constraint(equalToConstant: 4).isActive = true
+
+        // Burn-rate forecast line — only shown when the prefs flag is on and
+        // the extrapolation cleared the confidence gate inside Hud.burnRate.
+        if DisplayPrefs.burnRate, (pct ?? 0) > 40,
+           let burn = Hud.burnRate(a) {
+            let eta = Hud.burnRateText(burn.etaSeconds)
+            let resetTxt: String? = {
+                if let r = a.session5hResetsAt { return Hud.resetsText(r) }
+                return nil
+            }()
+            var parts: [String] = ["↗ " + L10n.text("on pace to fill in", "doluş süresi") + " \(eta)"]
+            if let r = resetTxt {
+                parts.append(L10n.text("window resets in \(r)", "pencere \(r) sonra"))
+            }
+            let forecast = NSTextField(labelWithString: parts.joined(separator: "  ·  "))
+            forecast.font = NSFont.systemFont(ofSize: 10, weight: .regular)
+            forecast.textColor = .tertiaryLabelColor
+            forecast.lineBreakMode = .byTruncatingTail
+            forecast.maximumNumberOfLines = 1
+            stack.addArrangedSubview(forecast)
+            forecast.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        }
+
+        // Incident strip — visible only when IncidentPoller surfaces an
+        // active upstream incident. Click opens the status page.
+        let incident = IncidentBadgeView()
+        incident.state = IncidentPoller.shared.current
+        if !incident.isHidden {
+            stack.addArrangedSubview(incident)
+            incident.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        }
+
+        // Celebration trigger — once per window rollover.
+        if DisplayPrefs.confetti,
+           Celebration.consumeReset(a.session5hResetsAt, key: "\(a.name).\(Celebration.session5hKey())") ||
+            Celebration.consumeReset(a.week7dResetsAt, key: "\(a.name).\(Celebration.week7dKey())") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak container] in
+                guard let container else { return }
+                Celebration.burst(in: container)
+            }
+        }
         return container
     }
 
@@ -461,7 +544,7 @@ final class MenubarPopoverViewController: NSViewController, NSMenuDelegate {
         val.textColor = color
 
         let resetLbl: NSTextField? = resetsAt.map { _ in
-            let l = NSTextField(labelWithString: "↻ \(Hud.resetsIn(resetsAt))")
+            let l = NSTextField(labelWithString: "↻ \(Hud.resetsText(resetsAt))")
             l.font = NSFont.systemFont(ofSize: 10)
             l.textColor = .tertiaryLabelColor
             return l
@@ -486,6 +569,7 @@ final class MenubarPopoverViewController: NSViewController, NSMenuDelegate {
         bar.value = max(0, min(1, (percent ?? 0) / 100.0))
         bar.tint = color
         bar.corner = 2
+        if DisplayPrefs.tickMarks { bar.tickMarks = [0.70, 0.90] }
         bar.translatesAutoresizingMaskIntoConstraints = false
 
         let stack = NSStackView(views: [header, bar])
@@ -606,6 +690,7 @@ final class MenubarPopoverViewController: NSViewController, NSMenuDelegate {
         bar.tint = ThemeStore.current.accent
         bar.gradientEnd = ThemeStore.current.pctMid
         bar.corner = 2
+        if DisplayPrefs.tickMarks { bar.tickMarks = [0.70, 0.90] }
         bar.translatesAutoresizingMaskIntoConstraints = false
 
         let stack = NSStackView(views: [topRow, bar, meta])
