@@ -143,8 +143,7 @@ pub fn write_snapshot_from_stdin(path: Option<PathBuf>) -> Result<String, String
     }
     let body = serde_json::to_vec_pretty(&snapshot)
         .map_err(|error| format!("serialize statusline snapshot failed: {error}"))?;
-    std::fs::write(&output_path, body)
-        .map_err(|error| format!("write {} failed: {error}", output_path.display()))?;
+    crate::state_writer::atomic_write(&output_path, &body)?;
 
     Ok(line)
 }

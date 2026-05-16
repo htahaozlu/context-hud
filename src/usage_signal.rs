@@ -265,8 +265,60 @@ fn resolve_usage_script() -> std::path::PathBuf {
     PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/src/usage_signal.py"))
 }
 
+/// Where we cache the full Python-emitted snapshot. Distinct from
+/// `usage_api_cache.json` (which Python uses for upstream API responses).
+#[cfg(not(target_arch = "wasm32"))]
+fn snapshot_cache_path() -> Option<std::path::PathBuf> {
+    let home = std::env::var("HOME").ok()?;
+    Some(std::path::PathBuf::from(home).join(".context-hud").join("usage.cache.json"))
+}
+
+/// TTL for the Rust-side snapshot cache. Matches the Python `CACHE_TTL_OK`
+/// upstream API window so we never spawn Python more often than the data
+/// changes anyway.
+#[cfg(not(target_arch = "wasm32"))]
+const SNAPSHOT_CACHE_TTL_SECS: u64 = 300;
+
+#[cfg(not(target_arch = "wasm32"))]
+fn load_snapshot_cache() -> Option<UsageSnapshot> {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let path = snapshot_cache_path()?;
+    let meta = std::fs::metadata(&path).ok()?;
+    let modified = meta.modified().ok()?;
+    let age = SystemTime::now().duration_since(modified).ok()?;
+    if age.as_secs() > SNAPSHOT_CACHE_TTL_SECS {
+        return None;
+    }
+    // Avoid stale-clock surprise: if file timestamp is far in the future, bail.
+    if modified.duration_since(UNIX_EPOCH).ok()?.as_secs() == 0 {
+        return None;
+    }
+    let bytes = std::fs::read(&path).ok()?;
+    serde_json::from_slice::<UsageSnapshot>(&bytes).ok()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn save_snapshot_cache(snapshot: &UsageSnapshot) {
+    let Some(path) = snapshot_cache_path() else { return };
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(bytes) = serde_json::to_vec(snapshot) {
+        // Best-effort; cache miss on next tick is acceptable.
+        let _ = std::fs::write(&path, bytes);
+    }
+}
+
 pub fn collect_native() -> UsageSnapshot {
     use std::process::Command;
+
+    // Fast path: reuse a fresh on-disk snapshot to avoid spawning python3 on
+    // every daemon tick. Python's own internal cache is per-process, so when
+    // we re-spawn it pays full JSONL parse cost every time.
+    if let Some(mut cached) = load_snapshot_cache() {
+        cached.accounts = collect_accounts();
+        return cached;
+    }
 
     let script_path = resolve_usage_script();
 
@@ -290,6 +342,9 @@ pub fn collect_native() -> UsageSnapshot {
 
     match serde_json::from_slice::<UsageSnapshot>(&output.stdout) {
         Ok(mut snapshot) => {
+            // Persist the parsed snapshot (without accounts, which are cheap
+            // and host-specific) so the next tick within TTL skips Python.
+            save_snapshot_cache(&snapshot);
             snapshot.accounts = collect_accounts();
             snapshot
         }

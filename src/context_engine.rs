@@ -359,10 +359,10 @@ fn filter_files_for_window(
     files: &[FileObservation],
     duration: std::time::Duration,
 ) -> Vec<FileObservation> {
+    let now = SystemTime::now();
     files.iter()
         .filter(|file| {
-            SystemTime::now()
-                .duration_since(file.modified_at)
+            now.duration_since(file.modified_at)
                 .map(|age| age <= duration)
                 .unwrap_or(false)
         })
@@ -370,9 +370,14 @@ fn filter_files_for_window(
         .collect()
 }
 
+/// Maximum directory recursion depth for `collect_dir`. Prevents stack
+/// overflow / runaway walks on pathological worktrees (deep symlink chains,
+/// generated monorepos, etc.). 12 is generous for real projects.
+const MAX_COLLECT_DEPTH: usize = 12;
+
 fn collect_file_observations(root: &Path) -> Result<Vec<FileObservation>, String> {
     let mut observations = Vec::new();
-    collect_dir(root, root, &mut observations)?;
+    collect_dir(root, root, &mut observations, 0)?;
     observations.sort_by(|left, right| right.modified_at.cmp(&left.modified_at));
     Ok(observations)
 }
@@ -381,7 +386,11 @@ fn collect_dir(
     root: &Path,
     current: &Path,
     observations: &mut Vec<FileObservation>,
+    depth: usize,
 ) -> Result<(), String> {
+    if depth >= MAX_COLLECT_DEPTH {
+        return Ok(());
+    }
     for entry in fs::read_dir(current)
         .map_err(|error| format!("failed to read directory {}: {error}", current.display()))?
     {
@@ -399,7 +408,7 @@ fn collect_dir(
             if should_skip_dir(&path) {
                 continue;
             }
-            collect_dir(root, &path, observations)?;
+            collect_dir(root, &path, observations, depth + 1)?;
             continue;
         }
 

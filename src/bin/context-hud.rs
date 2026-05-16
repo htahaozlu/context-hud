@@ -18,6 +18,8 @@
 use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 
@@ -139,13 +141,30 @@ fn run_claude_statusline(path: Option<PathBuf>) -> i32 {
 
 fn run_watch_global(secs: u64) -> i32 {
     eprintln!("context-hud watch-global: every {secs}s. Ctrl-C to stop.");
-    loop {
+    let running = Arc::new(AtomicBool::new(true));
+    let r = running.clone();
+    ctrlc::set_handler(move || r.store(false, Ordering::SeqCst)).ok();
+    let mut backoff_secs: u64 = 1;
+    while running.load(Ordering::SeqCst) {
         match refresh_global() {
-            Ok(path) => eprintln!("[{}] refreshed {}", now_local(), path.display()),
-            Err(error) => eprintln!("[{}] refresh error: {error}", now_local()),
+            Ok(path) => {
+                eprintln!("[{}] refreshed {}", now_local(), path.display());
+                backoff_secs = 1;
+                thread::sleep(Duration::from_secs(secs));
+            }
+            Err(error) => {
+                eprintln!(
+                    "[{}] refresh error: {error} (backoff {}s)",
+                    now_local(),
+                    backoff_secs
+                );
+                thread::sleep(Duration::from_secs(backoff_secs));
+                backoff_secs = (backoff_secs.saturating_mul(2)).min(60);
+            }
         }
-        thread::sleep(Duration::from_secs(secs));
     }
+    eprintln!("context-hud: shutdown signal received, exiting");
+    0
 }
 
 fn refresh_global() -> Result<PathBuf, String> {
@@ -222,22 +241,45 @@ fn fmt_tokens(value: u64) -> String {
 
 fn run_watch(root: Option<PathBuf>, secs: u64) -> i32 {
     eprintln!("context-hud watch: every {secs}s. Ctrl-C to stop.");
-    loop {
+    let running = Arc::new(AtomicBool::new(true));
+    let r = running.clone();
+    ctrlc::set_handler(move || r.store(false, Ordering::SeqCst)).ok();
+    let mut backoff_secs: u64 = 1;
+    while running.load(Ordering::SeqCst) {
         match refresh(root.clone()) {
-            Ok((root, _)) => eprintln!(
-                "[{}] refreshed {}/.context-hud/hud.md",
-                now_local(),
-                root.display()
-            ),
-            Err(error) => eprintln!("[{}] refresh error: {error}", now_local()),
+            Ok((root, _)) => {
+                eprintln!(
+                    "[{}] refreshed {}/.context-hud/hud.md",
+                    now_local(),
+                    root.display()
+                );
+                backoff_secs = 1;
+                thread::sleep(Duration::from_secs(secs));
+            }
+            Err(error) => {
+                eprintln!(
+                    "[{}] refresh error: {error} (backoff {}s)",
+                    now_local(),
+                    backoff_secs
+                );
+                thread::sleep(Duration::from_secs(backoff_secs));
+                backoff_secs = (backoff_secs.saturating_mul(2)).min(60);
+            }
         }
-        thread::sleep(Duration::from_secs(secs));
     }
+    eprintln!("context-hud: shutdown signal received, exiting");
+    0
 }
 
 fn refresh(root: Option<PathBuf>) -> Result<(PathBuf, ContextSnapshot), String> {
     let root = root
-        .unwrap_or_else(|| env::current_dir().expect("cwd"))
+        .unwrap_or_else(|| match env::current_dir() {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("cwd unreadable: {e}");
+                std::process::exit(2);
+            }
+        })
         .canonicalize()
         .map_err(|error| format!("canonicalize failed: {error}"))?;
 

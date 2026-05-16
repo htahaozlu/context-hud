@@ -106,7 +106,7 @@ pub fn render(snapshot: &ContextSnapshot) -> String {
     // ── Footer ───────────────────────────────────────────────────────────────
     out.push_str("---\n");
     out.push_str(
-        "state.json is the machine-readable source. Regenerated on save; do not edit.\n",
+        "hud.json is the machine-readable source. Regenerated on save; do not edit.\n",
     );
 
     out
