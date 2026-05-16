@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, adapted for the current release workflow.
 
+## [0.3.3] - 2026-05-16
+
+### Fixed
+
+- Popover no longer flickers on the 10s refresh when active sessions change. `rebuild()` now fingerprints every rendered field (agent, active sessions, tools, theme, language) and bails early when the snapshot is byte-identical to the last render. When data does change, the rebuild is wrapped in `CATransaction.setDisableActions(true)` to suppress implicit sublayer animations.
+- Card content edges (leading/trailing) bumped from 12pt to 16pt so all four sides match — removes the top/right whitespace asymmetry users reported.
+
+### Added
+
+- New "Parallel sessions" card in the popover. Shows each concurrent Claude Code session with project name, model, last-turn relative time, and a 4pt capsule context bar with percent text. Foreground session is filtered out by `cwd` match; card hides entirely when only one session is active; capped at 5 rows with a "+N more" overflow line.
+
 ## [0.3.2] - 2026-05-16
 
 ### Fixed
