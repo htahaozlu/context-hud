@@ -4,6 +4,42 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, adapted for the current release workflow.
 
+## [0.3.0] - 2026-05-16
+
+### Fixed
+
+- Token math now follows Anthropic's billed-tokens view: `input + cache_create + cache_read + output`. Previous formula omitted `cache_read`, undercounting cache-heavy sessions by 10–100× versus the Anthropic console / `/cost`.
+- 5-hour session split resets from session-start (matches Anthropic), not from the previous turn — long sessions no longer merge across resets.
+- Context-window table corrected: default 200K; 1M only when the model tag literally contains `[1m]`/`-1m`. Stale name-based 1M guesses (sonnet-4-6, opus-4-7, mythos) removed; percentages no longer report fake-low.
+- `last_context_pct` now ignores subagent transcripts (no `parentUuid`) and prefers the cwd-matched foreground session, so the foreground context % isn't inflated by Task / Agent tool calls.
+- Claude path now counts extended-thinking / reasoning output tokens (parity with the Codex path).
+- Dark Mode: stat tiles, chip cards, title preview, and theme cards refresh layer colors on `viewDidChangeEffectiveAppearance` — no more cards stuck in the previous appearance after toggling Light/Dark while the app runs.
+- Heatmap and sparkline now follow the active theme palette (no more `systemOrange` drift in Neon/Terminal themes).
+- Usage view preserves scroll position across 10-second refreshes.
+- Popover hero meta truncates from the tail and prioritizes the project name; long model names like `claude-opus-4-7[1m]` no longer push the project off-screen.
+- Theme card preview shows real `pctLow` / `pctMid` / `pctHigh` swatches at 12% / 42% / 85% instead of always 85% in `pctHigh`.
+- `currentStreak` skips at most one leading empty day, then breaks on the next zero — a real gap correctly ends the streak.
+- Background battery cost: the 10s timer no longer respawns the engine when both popover and detail window are hidden. FSEvents still drive on-demand refresh.
+- Rust state writes are durable: `state_writer::atomic_write` now `fsync`s before rename and uses unique tmp suffixes (`pid.nanos.tmp`) so concurrent writers and `watch` daemons can't race the same temp file. `claude_statusline` writes through the same helper.
+- Watch daemons honor SIGINT/SIGTERM cleanly and back off exponentially (1→60s) on consecutive errors instead of spinning at 30s on failures.
+- `collect_dir` walks bound to depth 12 — pathological symlink loops and very deep repos no longer stall the engine.
+
+### Added
+
+- Update integrity: `UpdateManager` now fetches the published `.sha256` sibling asset, stream-hashes the downloaded DMG, and aborts on mismatch or fetch failure (no silent skip). Defense-in-depth on top of notarization.
+- Popover material switched from `.menu` to `.popover` for proper native chrome.
+- Localized strings for previously hardcoded English fragments (`context` caption, Quit menu, settings preview placeholder).
+
+### Changed
+
+- Daemon perf: `usage_signal.rs` now reuses `~/.context-hud/usage.cache.json` for up to 300s instead of spawning `python3 src/usage_signal.py` on every 30s watch tick.
+- Release profile: `lto = "thin"`, `strip = "symbols"`, `codegen-units = 1` — smaller, faster engine binary.
+- Logos compressed (`app_logo.png` 4.8M → 2.4M; `logo.png` 1.6M → 1.4M) via `oxipng -o max`.
+
+### Removed
+
+- ~150 lines of `_legacy_unused` AppKit menu code in `AppDelegate.swift`; dead views `LimitRowView`, `MenuHeaderView`, `DisplayTableController`, `buildContextRow`.
+
 ## [0.2.2] - 2026-05-15
 
 ### Fixed

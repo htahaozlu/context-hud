@@ -1,6 +1,6 @@
 [package]
 name = "context-hud"
-version = "0.2.4"
+version = "0.3.0"
 edition = "2024"
 license = "Apache-2.0"
 
@@ -17,6 +17,7 @@ zed_extension_api = "0.7.0"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 serde_json = "1.0"
+ctrlc = "3"
 
 [[example]]
 name = "snapshot"
@@ -26,3 +27,8 @@ path = "examples/snapshot.rs"
 name = "context-hud"
 path = "src/bin/context-hud.rs"
 required-features = []
+
+[profile.release]
+lto = "thin"
+strip = "symbols"
+codegen-units = 1
