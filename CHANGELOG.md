@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, adapted for the current release workflow.
 
+## [0.3.2] - 2026-05-16
+
+### Fixed
+
+- Claude context-window detection: Claude Code ships Opus 4.6/4.7, Sonnet 4.5/4.6/4.7 and Mythos as the 1M-context variant by default, but the transcript JSONL records the model id without the `[1m]` suffix. v0.3.0 had stripped these defaults, so users on the 1M variant saw their context percentage jump 5× (e.g. 12% → 60%). Restored the family-level defaults; Haiku stays at 200K; the `[1m]`/`-1m` tag and the recorded `context-1m-*` beta header still force 1M; observed turn-token max above 200K snaps to 1M adaptively. Env override `CONTEXTHUD_CONTEXT_WINDOW` honored.
+
 ## [0.3.1] - 2026-05-16
 
 ### Fixed
