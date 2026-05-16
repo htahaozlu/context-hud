@@ -283,7 +283,11 @@ def build_active_sessions(per_session):
         window = s.get("last_window")
         if not window:
             try:
-                window = claude_context_window(s.get("model"))
+                window = claude_context_window(
+                    s.get("model"),
+                    observed_max=int(s.get("max_ctx", 0) or 0),
+                    betas=list(s.get("betas") or []),
+                )
             except Exception:
                 window = None
         last_input = int(s.get("last_input", 0) or 0)
@@ -306,14 +310,38 @@ def build_active_sessions(per_session):
     return actives
 
 
-def claude_context_window(model):
-    if not model:
-        return 200000
-    m = model.lower()
-    # Only treat as 1M when the model tag explicitly opts in (`[1m]` / `-1m`).
-    # All current Claude models default to a 200K context window; the 1M beta
-    # requires an explicit header and is not implied by the model name alone.
-    if "[1m]" in m or "-1m" in m:
+def claude_context_window(model, observed_max=0, betas=None):
+    # Env override for power users who know their window.
+    env = os.environ.get("CONTEXTHUD_CONTEXT_WINDOW")
+    if env:
+        try:
+            return int(env)
+        except ValueError:
+            pass
+    if model:
+        m = model.lower()
+        # Explicit 1M tag — most reliable signal.
+        if "[1m]" in m or "-1m" in m:
+            return 1_000_000
+        # Claude Code defaults for models that ship with the 1M context beta
+        # enabled. These match the variants CC actually requests; without the
+        # statusline hook the JSONL drops the [1m] suffix, so we use the
+        # model family to fill in. Haiku stays at 200K.
+        if "haiku" in m:
+            return 200_000
+        if ("opus-4-7" in m or "opus-4-6" in m
+                or "sonnet-4-7" in m or "sonnet-4-6" in m
+                or "sonnet-4-5" in m or "mythos" in m):
+            return 1_000_000
+    # Beta header recorded in transcript (Anthropic 1M context beta).
+    if betas:
+        for b in betas:
+            bl = str(b).lower()
+            if "context-1m" in bl or "1m-2025" in bl:
+                return 1_000_000
+    # Adaptive fallback: a turn whose context already exceeds 200K can only
+    # have happened on the 1M variant. Snap to 1M so % is meaningful.
+    if observed_max and observed_max > 200_000:
         return 1_000_000
     return 200_000
 
@@ -632,6 +660,8 @@ def collect_claude():
                         "cache_read": 0,
                         "model": msg.get("model"), "cwd": obj.get("cwd"),
                         "last_input": 0,
+                        "max_ctx": 0,
+                        "betas": set(),
                         "events": [],
                     })
                     sess["first_ts"] = min(sess["first_ts"], ts)
@@ -641,6 +671,14 @@ def collect_claude():
                     sess["tokens"] += total
                     sess["cache_read"] += cache_read
                     sess["events"].append((ts, total, cache_read))
+                    if inp > sess["max_ctx"]:
+                        sess["max_ctx"] = inp
+                    # Collect betas if recorded anywhere on the JSONL row.
+                    for src in (obj, msg):
+                        b = src.get("betas") if isinstance(src, dict) else None
+                        if isinstance(b, list):
+                            for item in b:
+                                sess["betas"].add(str(item))
                     if msg.get("model"):
                         sess["model"] = msg.get("model")
                     if obj.get("cwd"):
@@ -688,6 +726,8 @@ def collect_claude():
                                 "outp": outp,
                                 "timestamp": obj.get("timestamp"),
                                 "path": path,
+                                "max_ctx": sess["max_ctx"],
+                                "betas": list(sess["betas"]),
                             },
                         }
         except OSError:
@@ -716,7 +756,11 @@ def collect_claude():
     if cwd_match:
         path, s = cwd_match
         model = s.get("model")
-        window = claude_context_window(model)
+        window = claude_context_window(
+            model,
+            observed_max=s.get("max_ctx", 0),
+            betas=list(s.get("betas") or []),
+        )
         inp = int(s.get("last_input", 0) or 0)
         out["last_model"] = model or out["last_model"]
         out["last_cwd"] = s.get("cwd") or out["last_cwd"]
@@ -726,7 +770,11 @@ def collect_claude():
             round(min(200.0, inp / window * 100.0), 2) if window else None
         )
     elif fg:
-        window = claude_context_window(fg.get("model"))
+        window = claude_context_window(
+            fg.get("model"),
+            observed_max=int(fg.get("max_ctx", 0) or 0),
+            betas=fg.get("betas") or [],
+        )
         inp = int(fg.get("inp", 0) or 0)
         out["last_model"] = fg.get("model") or out["last_model"]
         out["last_cwd"] = fg.get("cwd") or out["last_cwd"]
