@@ -4,26 +4,60 @@ import Foundation
 final class MenubarCardView: NSView {
     init() {
         super.init(frame: .zero)
-        wantsLayer = true
-        layer?.cornerRadius = 12
-        layer?.cornerCurve = .continuous
-        layer?.borderWidth = 0.5
         translatesAutoresizingMaskIntoConstraints = false
-        updateColors()
+        Surface.applyCard(self)
     }
     required init?(coder: NSCoder) { fatalError() }
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
-        updateColors()
+        Surface.refreshCardColors(self)
+    }
+}
+
+/// Premium hero card with a subtle accent gradient overlay. Used as the top
+/// section of the popover for the active agent — provides the "you opened
+/// something premium" first impression.
+final class MenubarHeroCardView: NSView {
+    private let gradient = CAGradientLayer()
+    private let pulse = CALayer()
+
+    init() {
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        Surface.applyHero(self)
+        gradient.cornerRadius = Radius.hero
+        gradient.cornerCurve = .continuous
+        gradient.masksToBounds = true
+        gradient.startPoint = CGPoint(x: 0, y: 0)
+        gradient.endPoint = CGPoint(x: 1, y: 1)
+        layer?.insertSublayer(gradient, at: 0)
+        applyGradient()
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func layout() {
+        super.layout()
+        gradient.frame = bounds
     }
 
-    private func updateColors() {
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        Surface.refreshHeroChrome(self)
+        applyGradient()
+    }
+
+    private func applyGradient() {
         let isDark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        layer?.backgroundColor = (isDark
-            ? NSColor.white.withAlphaComponent(0.05)
-            : NSColor.black.withAlphaComponent(0.04)).cgColor
-        layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.25).cgColor
+        let baseAlpha: CGFloat = MotionPrefs.reduceTransparency ? 1.0 : (isDark ? 0.30 : 0.55)
+        let base = NSColor.controlBackgroundColor.withAlphaComponent(baseAlpha)
+        let accent = ThemeStore.current.accent
+        let stop1 = accent.withAlphaComponent(0.10)
+        let stop2 = accent.withAlphaComponent(0.02)
+        gradient.colors = [
+            stop1.blended(withFraction: 0.7, of: base)?.cgColor ?? base.cgColor,
+            stop2.blended(withFraction: 0.95, of: base)?.cgColor ?? base.cgColor,
+        ]
     }
 }
 
@@ -33,27 +67,21 @@ final class MenubarCardView: NSView {
 final class CompactStatView: NSView {
     init(caption: String, value: String, valueColor: NSColor, sub: String? = nil) {
         super.init(frame: .zero)
-        wantsLayer = true
-        layer?.cornerRadius = 10
-        layer?.cornerCurve = .continuous
-        layer?.borderWidth = 0.5
         translatesAutoresizingMaskIntoConstraints = false
-        updateColors()
+        Surface.applyCard(self)
 
-        let cap = NSTextField(labelWithString: caption.uppercased())
-        cap.font = NSFont.systemFont(ofSize: 9, weight: .semibold)
-        cap.textColor = .tertiaryLabelColor
+        let cap = NSTextField(labelWithAttributedString: Typography.captionAttributed(caption))
         cap.translatesAutoresizingMaskIntoConstraints = false
 
         let val = NSTextField(labelWithString: value)
-        val.font = NSFont.monospacedSystemFont(ofSize: 17, weight: .semibold)
+        val.font = Typography.displayMono(17, weight: .semibold)
         val.textColor = valueColor
         val.lineBreakMode = .byTruncatingTail
         val.translatesAutoresizingMaskIntoConstraints = false
 
         addSubview(cap); addSubview(val)
-        let padH: CGFloat = 12
-        let padV: CGFloat = 10
+        let padH: CGFloat = Spacing.s
+        let padV: CGFloat = Spacing.s
         var constraints: [NSLayoutConstraint] = [
             cap.topAnchor.constraint(equalTo: topAnchor, constant: padV),
             cap.leadingAnchor.constraint(equalTo: leadingAnchor, constant: padH),
@@ -88,12 +116,7 @@ final class CompactStatView: NSView {
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
-        updateColors()
-    }
-
-    private func updateColors() {
-        layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.4).cgColor
-        layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.3).cgColor
+        Surface.refreshCardColors(self)
     }
 }
 
@@ -109,6 +132,8 @@ final class ActivityDotView: NSView {
         translatesAutoresizingMaskIntoConstraints = false
         layer?.cornerRadius = 5
         updateAppearance()
+        setAccessibilityRole(.image)
+        setAccessibilityLabel("Agent activity")
     }
     required init?(coder: NSCoder) { fatalError() }
 
@@ -124,9 +149,10 @@ final class ActivityDotView: NSView {
 
     private func restartIfNeeded() {
         updateAppearance()
+        setAccessibilityValue(isActive ? "Active" : "Idle")
         guard let layer = self.layer else { return }
         layer.removeAnimation(forKey: "pulse")
-        guard isActive else { return }
+        guard isActive, !MotionPrefs.reduceMotion else { return }
         let anim = CABasicAnimation(keyPath: "opacity")
         anim.fromValue = 1.0
         anim.toValue = 0.35

@@ -392,10 +392,24 @@ final class StatsViewController: PreferencePaneViewController {
 /// `values` (newest-first). Days are placed bottom-right to top-left so the
 /// most recent day is the bottom-right cell.
 final class HeatmapView: NSView {
-    var values: [(date: String, tokens: UInt64)] = [] { didSet { needsDisplay = true } }
+    var values: [(date: String, tokens: UInt64)] = [] {
+        didSet { needsDisplay = true; updateA11y() }
+    }
 
     override var isFlipped: Bool { true }
     override var intrinsicContentSize: NSSize { NSSize(width: NSView.noIntrinsicMetric, height: 124) }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setAccessibilityRole(.image)
+        setAccessibilityLabel("30-day activity heatmap")
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    private func updateA11y() {
+        let active = values.filter { $0.tokens > 0 }.count
+        setAccessibilityValue("\(active) active days out of \(values.count)")
+    }
 
     override func draw(_ dirtyRect: NSRect) {
         guard !values.isEmpty else { return }
@@ -427,7 +441,10 @@ final class HeatmapView: NSView {
         let newestWeekday = (cal.component(.weekday, from: newestDate) + 5) % 7 // Mon=0..Sun=6
 
         let maxTok = max(values.map(\.tokens).max() ?? 1, 1)
-        let accent = ThemeStore.current.pctHigh
+        let accent = ThemeStore.current.accent
+
+        // Squircle radius scales with cell size for continuous-curve feel.
+        let radius = max(2, min(8, cell * 0.28))
 
         for (i, v) in values.enumerated() {
             let offsetFromNewest = i
@@ -438,21 +455,15 @@ final class HeatmapView: NSView {
             let x = CGFloat(col) * (cell + gap)
             let y = CGFloat(row) * (cell + gap)
             let rect = NSRect(x: x, y: y, width: cell, height: cell)
-            let path = NSBezierPath(roundedRect: rect, xRadius: 2, yRadius: 2)
+            let path = NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius)
             if v.tokens == 0 {
-                NSColor.tertiaryLabelColor.withAlphaComponent(0.12).setFill()
+                NSColor.separatorColor.withAlphaComponent(0.25).setFill()
                 path.fill()
                 continue
             }
-            // 4 buckets, log-scaled so very large days don't drown the rest.
+            // Smooth log-mapped alpha: 0.20 → 0.90, no hard quartile steps.
             let norm = log(Double(v.tokens) + 1) / log(Double(maxTok) + 1)
-            let alpha: CGFloat
-            switch norm {
-            case ..<0.35: alpha = 0.28
-            case ..<0.6:  alpha = 0.5
-            case ..<0.85: alpha = 0.75
-            default:      alpha = 1.0
-            }
+            let alpha: CGFloat = 0.20 + CGFloat(norm) * 0.70
             accent.withAlphaComponent(alpha).setFill()
             path.fill()
         }

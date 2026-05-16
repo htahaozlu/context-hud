@@ -53,6 +53,17 @@ final class DetailWindowController: NSWindowController, NSWindowDelegate {
         self.window = window
         window.delegate = self
 
+        // Premium frosted background — under-window blending so the desktop
+        // wallpaper softly bleeds through behind the tab content.
+        if let contentView = window.contentView {
+            let effect = NSVisualEffectView(frame: contentView.bounds)
+            effect.autoresizingMask = [.width, .height]
+            effect.material = .underWindowBackground
+            effect.blendingMode = .behindWindow
+            effect.state = .active
+            contentView.addSubview(effect, positioned: .below, relativeTo: nil)
+        }
+
         appearanceVC.onThemeChange = onThemeChange
         menubarVC.onThemeChange = onThemeChange
     }

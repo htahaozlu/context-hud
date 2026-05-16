@@ -4,35 +4,23 @@ import Foundation
 final class PreferenceSectionCard: NSView {
     init(content: NSView) {
         super.init(frame: .zero)
-        wantsLayer = true
-        layer?.cornerRadius = 12
-        layer?.cornerCurve = .continuous
-        layer?.borderWidth = 0.5
         translatesAutoresizingMaskIntoConstraints = false
-        updateColors()
+        Surface.applyCard(self)
 
         content.translatesAutoresizingMaskIntoConstraints = false
         addSubview(content)
         NSLayoutConstraint.activate([
-            content.topAnchor.constraint(equalTo: topAnchor, constant: 16),
-            content.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 18),
-            content.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -18),
-            content.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -16),
+            content.topAnchor.constraint(equalTo: topAnchor, constant: Spacing.m),
+            content.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Spacing.l),
+            content.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Spacing.l),
+            content.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Spacing.m),
         ])
     }
     required init?(coder: NSCoder) { fatalError() }
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
-        updateColors()
-    }
-
-    private func updateColors() {
-        let isDark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        layer?.backgroundColor = (isDark
-            ? NSColor.white.withAlphaComponent(0.05)
-            : NSColor.black.withAlphaComponent(0.04)).cgColor
-        layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.25).cgColor
+        Surface.refreshCardColors(self)
     }
 }
 
@@ -43,7 +31,8 @@ class PreferencePaneViewController: NSViewController {
     override func loadView() {
         view = FlippedView()
         view.wantsLayer = true
-        view.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        // Transparent so the window's NSVisualEffectView frost shows through.
+        view.layer?.backgroundColor = NSColor.clear.cgColor
 
         scrollView.drawsBackground = false
         scrollView.hasVerticalScroller = true
@@ -89,20 +78,8 @@ class PreferencePaneViewController: NSViewController {
 
         // Sonoma System Settings-style uppercase section header — small,
         // medium weight, secondary color — keeps the focus on the card body.
-        let titleLabel = NSTextField(labelWithString: title.uppercased())
-        titleLabel.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
-        titleLabel.textColor = .secondaryLabelColor
-        let para = NSMutableParagraphStyle()
-        para.maximumLineHeight = 14
-        titleLabel.attributedStringValue = NSAttributedString(
-            string: title.uppercased(),
-            attributes: [
-                .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
-                .foregroundColor: NSColor.secondaryLabelColor,
-                .kern: 0.6,
-                .paragraphStyle: para,
-            ]
-        )
+        let titleLabel = NSTextField(labelWithAttributedString:
+            Typography.captionAttributed(title, color: .secondaryLabelColor))
         section.addArrangedSubview(titleLabel)
 
         if let subtitle, !subtitle.isEmpty {

@@ -3,8 +3,9 @@ import Foundation
 
 final class MenubarPopoverViewController: NSViewController, NSMenuDelegate {
     static let contentWidth: CGFloat = 360
-    private let hPad: CGFloat = 14
-    private let vGap: CGFloat = 10
+    private let hPad: CGFloat = Spacing.m
+    private let vGap: CGFloat = Spacing.s
+    private var didShowOnce = false
 
     var onOpenSettings: (() -> Void)?
     var onRefresh: (() -> Void)?
@@ -32,8 +33,8 @@ final class MenubarPopoverViewController: NSViewController, NSMenuDelegate {
 
         contentStack.orientation = .vertical
         contentStack.alignment = .leading
-        contentStack.spacing = 8
-        contentStack.edgeInsets = NSEdgeInsets(top: 8, left: 0, bottom: 12, right: 0)
+        contentStack.spacing = Spacing.s
+        contentStack.edgeInsets = NSEdgeInsets(top: Spacing.m, left: 0, bottom: Spacing.m, right: 0)
         contentStack.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(contentStack)
 
@@ -60,9 +61,6 @@ final class MenubarPopoverViewController: NSViewController, NSMenuDelegate {
 
         if let agent = primary {
             addCard(buildHero(agent: agent, isActive: agent.name == active?.name))
-            if let pct = agent.ctxPct {
-                addCard(buildContextMeter(agent: agent, pct: pct))
-            }
             addCard(buildStatRow(agent: agent))
             if agent.activeSessions.count > 1 {
                 addCard(buildConcurrentSessions(agent: agent))
@@ -81,6 +79,16 @@ final class MenubarPopoverViewController: NSViewController, NSMenuDelegate {
             width: Self.contentWidth,
             height: max(fit.height, 1)
         )
+
+        // First-show fade-in. Subsequent rebuilds skip this so the panel
+        // doesn't flicker on data refresh.
+        if !didShowOnce, !MotionPrefs.reduceMotion {
+            didShowOnce = true
+            let t = CATransition()
+            t.type = .fade
+            t.duration = 0.20
+            contentStack.layer?.add(t, forKey: "fadeIn")
+        }
     }
 
     /// Adds a section view to the popover stack and pins both leading and
@@ -94,8 +102,8 @@ final class MenubarPopoverViewController: NSViewController, NSMenuDelegate {
         v.setContentCompressionResistancePriority(.required, for: .vertical)
         contentStack.addArrangedSubview(v)
         NSLayoutConstraint.activate([
-            v.leadingAnchor.constraint(equalTo: contentStack.leadingAnchor, constant: 10),
-            v.trailingAnchor.constraint(equalTo: contentStack.trailingAnchor, constant: -10),
+            v.leadingAnchor.constraint(equalTo: contentStack.leadingAnchor, constant: Spacing.s),
+            v.trailingAnchor.constraint(equalTo: contentStack.trailingAnchor, constant: -Spacing.s),
         ])
     }
 
@@ -105,36 +113,52 @@ final class MenubarPopoverViewController: NSViewController, NSMenuDelegate {
     /// inside the card with consistent 14h/12v padding. Callers add content to
     /// the stack and the card auto-sizes its height while filling the popover
     /// width via the parent contentStack's `.width` alignment.
-    private func sectionContainer() -> (NSView, NSStackView) {
-        let card = MenubarCardView()
+    private func sectionContainer(hero: Bool = false) -> (NSView, NSStackView) {
+        let card: NSView = hero ? MenubarHeroCardView() : MenubarCardView()
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .width
-        stack.spacing = 4
+        stack.spacing = Spacing.xs
         stack.translatesAutoresizingMaskIntoConstraints = false
         card.addSubview(stack)
+        let pad: CGFloat = hero ? Spacing.m : Spacing.s
         NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: card.topAnchor, constant: 14),
-            stack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 16),
-            stack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -16),
-            stack.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -14),
+            stack.topAnchor.constraint(equalTo: card.topAnchor, constant: pad),
+            stack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: pad),
+            stack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -pad),
+            stack.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -pad),
         ])
         return (card, stack)
     }
 
     private func buildEmptyState() -> NSView {
-        let (container, stack) = sectionContainer()
+        let (container, stack) = sectionContainer(hero: true)
+        stack.alignment = .centerX
+        stack.spacing = Spacing.s
+
+        let cfg = NSImage.SymbolConfiguration(pointSize: 32, weight: .regular)
+        let iv = NSImageView()
+        iv.image = NSImage(systemSymbolName: "sparkles", accessibilityDescription: nil)?
+            .withSymbolConfiguration(cfg)
+        iv.contentTintColor = .tertiaryLabelColor
+        iv.translatesAutoresizingMaskIntoConstraints = false
+
         let title = NSTextField(labelWithString: L10n.text("No agent data yet", "Henüz ajan verisi yok"))
-        title.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        title.font = Typography.title(14)
         title.textColor = .labelColor
+        title.alignment = .center
+
         let sub = NSTextField(wrappingLabelWithString: L10n.text(
             "Start a Claude or Codex session to see context and limits here.",
             "Bağlam ve limitleri görmek için Claude veya Codex oturumu başlatın."
         ))
-        sub.font = NSFont.systemFont(ofSize: 11)
+        sub.font = Typography.body(11)
         sub.textColor = .secondaryLabelColor
+        sub.alignment = .center
         sub.maximumNumberOfLines = 0
         sub.preferredMaxLayoutWidth = Self.contentWidth - 2 * hPad
+
+        stack.addArrangedSubview(iv)
         stack.addArrangedSubview(title)
         stack.addArrangedSubview(sub)
         sub.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
@@ -142,51 +166,100 @@ final class MenubarPopoverViewController: NSViewController, NSMenuDelegate {
     }
 
     private func buildHero(agent a: Agent, isActive: Bool) -> NSView {
-        let (container, stack) = sectionContainer()
-        stack.spacing = 2
+        let (container, stack) = sectionContainer(hero: true)
+        stack.spacing = Spacing.s
 
+        // Top row: dot + project name (left) — large pct (right)
         let dot = ActivityDotView()
         dot.isActive = isActive
 
-        let nameLbl = agentInlineLabel(
-            name: a.name,
-            font: NSFont.systemFont(ofSize: 16, weight: .semibold),
-            color: .labelColor,
-            iconScale: 1.3
+        // Project name takes the primary slot (largest, .label color)
+        let projectLbl = NSTextField(labelWithString: a.project)
+        projectLbl.attributedStringValue = NSAttributedString(string: a.project, attributes: [
+            .font: Typography.display(22, weight: .semibold),
+            .foregroundColor: NSColor.labelColor,
+            .kern: -0.3,
+        ])
+        projectLbl.lineBreakMode = .byTruncatingTail
+        projectLbl.maximumNumberOfLines = 1
+        projectLbl.cell?.usesSingleLineMode = true
+        projectLbl.toolTip = a.project
+        projectLbl.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        let leftStack = NSStackView(views: [dot, projectLbl])
+        leftStack.orientation = .horizontal
+        leftStack.alignment = .centerY
+        leftStack.spacing = Spacing.xs
+
+        // Right: big % number
+        let pct = a.ctxPct
+        let pctStr = pct.map { String(format: "%.0f%%", $0) } ?? "—"
+        let pctColor: NSColor = pct.map { Hud.ctxColor($0) } ?? .tertiaryLabelColor
+        let pctLbl = NSTextField()
+        pctLbl.isBezeled = false
+        pctLbl.isEditable = false
+        pctLbl.drawsBackground = false
+        pctLbl.attributedStringValue = Typography.displayNumberAttributed(
+            pctStr, size: 28, weight: .semibold, color: pctColor
         )
-        nameLbl.toolTip = a.name
+        pctLbl.setContentHuggingPriority(.required, for: .horizontal)
 
-        let titleRow = NSStackView(views: [dot, nameLbl])
-        titleRow.orientation = .horizontal
-        titleRow.alignment = .centerY
-        titleRow.spacing = 8
+        let topRow = NSStackView(views: [leftStack, pctLbl])
+        topRow.orientation = .horizontal
+        topRow.alignment = .firstBaseline
+        topRow.distribution = .fill
+        topRow.spacing = Spacing.s
 
-        // Order: project first (the user's primary signal), then model, then
-        // "Xs ago", then duration. Tail truncation drops the least-important
-        // suffix (duration / time) before the project.
+        // Meta line: agent · model · time · duration
         var metaParts: [String] = []
-        metaParts.append(a.project)
+        metaParts.append(a.name)
         if let m = a.model { metaParts.append(m) }
         if let t = a.lastTurn { metaParts.append(Hud.relative(t)) }
         let duration = Hud.formatDuration(a.sessionStarted, a.lastTurn)
         if duration != "—" {
             metaParts.append(L10n.text("\(duration) running", "\(duration)"))
         }
-        let meta = NSTextField(labelWithString: metaParts.joined(separator: "  ·  "))
-        meta.font = NSFont.systemFont(ofSize: 11)
-        meta.textColor = .secondaryLabelColor
+        let metaText = metaParts.joined(separator: "  ·  ")
+        let meta = NSTextField(labelWithString: metaText)
+        meta.font = NSFont.systemFont(ofSize: 11, weight: .regular)
+        meta.textColor = .tertiaryLabelColor
         meta.lineBreakMode = .byTruncatingTail
         meta.maximumNumberOfLines = 1
         meta.cell?.usesSingleLineMode = true
-        meta.toolTip = metaParts.joined(separator: "  ·  ")
-        nameLbl.maximumNumberOfLines = 1
-        nameLbl.cell?.usesSingleLineMode = true
+        meta.toolTip = metaText
 
-        stack.addArrangedSubview(titleRow)
+        stack.addArrangedSubview(topRow)
         stack.addArrangedSubview(meta)
+        topRow.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+
+        // Context meter (capsule, 4pt). Always show — provides hero rhythm.
+        if let p = pct {
+            let bar = ProgressBarView()
+            bar.value = max(0, min(1, p / 100.0))
+            bar.tint = ThemeStore.current.accent
+            bar.gradientEnd = ThemeStore.current.pctMid
+            bar.corner = 2
+            bar.glow = p > 75
+            bar.translatesAutoresizingMaskIntoConstraints = false
+            bar.setAccessibilityLabel(L10n.text("Context usage", "Bağlam kullanımı"))
+
+            let used = a.activeSession
+            let detailText = a.ctxWindow.map { w in
+                "\(Hud.formatTokens(used)) / \(Hud.formatTokens(w))"
+            } ?? Hud.formatTokens(used)
+            let detail = NSTextField(labelWithString: detailText)
+            detail.font = Typography.bodyMono(11, weight: .regular)
+            detail.textColor = .tertiaryLabelColor
+
+            stack.addArrangedSubview(bar)
+            stack.addArrangedSubview(detail)
+            bar.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+            bar.heightAnchor.constraint(equalToConstant: 4).isActive = true
+        }
         return container
     }
 
+    @available(*, deprecated)
     private func buildContextMeter(agent a: Agent, pct: Double) -> NSView {
         let (container, stack) = sectionContainer()
         stack.spacing = 6
@@ -467,14 +540,13 @@ final class MenubarPopoverViewController: NSViewController, NSMenuDelegate {
         }
         popup.menu?.delegate = self
 
-        let prefix = NSTextField(labelWithString: L10n.text("Theme", "Tema"))
-        prefix.font = NSFont.systemFont(ofSize: 11)
-        prefix.textColor = .tertiaryLabelColor
+        let prefix = NSTextField(labelWithAttributedString:
+            Typography.captionAttributed(L10n.text("Theme", "Tema")))
 
         let stack = NSStackView(views: [prefix, popup])
         stack.orientation = .horizontal
         stack.alignment = .centerY
-        stack.spacing = 6
+        stack.spacing = Spacing.xs
         stack.translatesAutoresizingMaskIntoConstraints = false
         return stack
     }

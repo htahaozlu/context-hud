@@ -73,11 +73,7 @@ final class UsageViewController: NSViewController {
     /// "what" and "when/how much" without scanning multiple sections.
     private func buildAgentCard(agent a: Agent, isActive: Bool, showsHeader: Bool) -> NSView {
         let card = NSView()
-        card.wantsLayer = true
-        card.layer?.cornerRadius = 12
-        card.layer?.cornerCurve = .continuous
-        card.layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.6).cgColor
-        card.layer?.borderWidth = 0
+        Surface.applyCard(card)
         card.translatesAutoresizingMaskIntoConstraints = false
 
         // Header: ● Name  · model · project · last turn
@@ -172,21 +168,20 @@ final class UsageViewController: NSViewController {
 
         let row = NSView()
         row.translatesAutoresizingMaskIntoConstraints = false
-        let cap = NSTextField(labelWithString: L10n.text("30-DAY TOKENS", "30 GÜN TOKEN"))
-        cap.font = NSFont.systemFont(ofSize: 9, weight: .semibold)
-        cap.textColor = .tertiaryLabelColor
+        let cap = NSTextField(labelWithAttributedString:
+            Typography.captionAttributed(L10n.text("30-day tokens", "30 gün token")))
         cap.translatesAutoresizingMaskIntoConstraints = false
 
         let total = values.reduce(0, +)
         let totalLbl = NSTextField(labelWithString: Hud.formatTokens(UInt64(total)))
-        totalLbl.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+        totalLbl.font = Typography.bodyMono(11, weight: .regular)
         totalLbl.textColor = .secondaryLabelColor
         totalLbl.alignment = .right
         totalLbl.translatesAutoresizingMaskIntoConstraints = false
 
         let spark = SparklineView()
         spark.values = Array(values)
-        spark.tint = ThemeStore.current.pctHigh
+        spark.tint = ThemeStore.current.accent
         spark.translatesAutoresizingMaskIntoConstraints = false
 
         row.addSubview(cap); row.addSubview(totalLbl); row.addSubview(spark)
@@ -206,11 +201,7 @@ final class UsageViewController: NSViewController {
 
     private func buildOthersCard(tools: [ToolSummary]) -> NSView {
         let card = NSView()
-        card.wantsLayer = true
-        card.layer?.cornerRadius = 12
-        card.layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.6).cgColor
-        card.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.6).cgColor
-        card.layer?.borderWidth = 1
+        Surface.applyCard(card)
         card.translatesAutoresizingMaskIntoConstraints = false
 
         let title = NSTextField(labelWithString: L10n.text("Other AI tools", "Diğer AI araçları"))
