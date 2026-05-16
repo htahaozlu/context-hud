@@ -1,4 +1,5 @@
 import AppKit
+import CryptoKit
 import Foundation
 
 struct AppMetadata {
@@ -29,6 +30,7 @@ struct ReleaseInfo {
     let current: String
     let htmlURL: URL
     let dmgURL: URL
+    let sha256URL: URL
 }
 
 final class UpdateProgressWindowController: NSWindowController {
@@ -145,6 +147,12 @@ final class UpdateManager: NSObject, URLSessionDownloadDelegate {
                           let raw = asset["browser_download_url"] as? String else { return nil }
                     return URL(string: raw)
                 }.first
+                let shaURL = assets.compactMap { asset -> URL? in
+                    guard let name = asset["name"] as? String,
+                          name.hasSuffix(".dmg.sha256"),
+                          let raw = asset["browser_download_url"] as? String else { return nil }
+                    return URL(string: raw)
+                }.first
                 guard self.isNewer(latest: latest, current: current) else {
                     self.presentUpToDate(current: current, presenter: presenter)
                     return
@@ -153,7 +161,8 @@ final class UpdateManager: NSObject, URLSessionDownloadDelegate {
                     self.presentUpdateError(presenter: presenter)
                     return
                 }
-                let release = ReleaseInfo(latest: latest, current: current, htmlURL: htmlURL, dmgURL: dmgURL)
+                let sha256URL = shaURL ?? URL(string: dmgURL.absoluteString + ".sha256")!
+                let release = ReleaseInfo(latest: latest, current: current, htmlURL: htmlURL, dmgURL: dmgURL, sha256URL: sha256URL)
                 self.presentUpdateAvailable(release: release, presenter: presenter)
             }
         }.resume()
@@ -229,8 +238,86 @@ final class UpdateManager: NSObject, URLSessionDownloadDelegate {
 
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
         guard let release = activeRelease else { return }
+        // The system removes `location` once this delegate returns, so copy first.
+        let stagedDMG = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ContextHUD-\(UUID().uuidString).dmg")
         do {
-            let mountURL = try mountDMG(at: location)
+            if FileManager.default.fileExists(atPath: stagedDMG.path) {
+                try? FileManager.default.removeItem(at: stagedDMG)
+            }
+            try FileManager.default.copyItem(at: location, to: stagedDMG)
+        } catch {
+            progressWindow?.close()
+            progressWindow = nil
+            cleanupSession()
+            presentInstallError(error)
+            return
+        }
+
+        progressWindow?.update(
+            message: L10n.text("Verifying update…", "Güncelleme doğrulanıyor…"),
+            detail: L10n.text("Checking integrity of ContextHUD v\(release.latest).", "ContextHUD v\(release.latest) bütünlüğü denetleniyor."),
+            fraction: nil
+        )
+
+        let sha256URL = release.sha256URL
+        var shaReq = URLRequest(url: sha256URL)
+        shaReq.timeoutInterval = 15
+        URLSession.shared.dataTask(with: shaReq) { [weak self] data, response, error in
+            guard let self else { return }
+            DispatchQueue.main.async {
+                let http = response as? HTTPURLResponse
+                guard error == nil, let data, (http?.statusCode ?? 200) < 400, !data.isEmpty,
+                      let text = String(data: data, encoding: .utf8) else {
+                    try? FileManager.default.removeItem(at: stagedDMG)
+                    self.progressWindow?.close()
+                    self.progressWindow = nil
+                    self.cleanupSession()
+                    self.presentInstallError(NSError(
+                        domain: "ContextHUD.Update",
+                        code: 5,
+                        userInfo: [NSLocalizedDescriptionKey: L10n.text(
+                            "Verification asset unavailable.",
+                            "Doğrulama dosyası alınamadı."
+                        )]
+                    ))
+                    return
+                }
+                let expected = self.parseShaToken(text)
+                let computed: String
+                do {
+                    computed = try self.sha256Hex(of: stagedDMG)
+                } catch {
+                    try? FileManager.default.removeItem(at: stagedDMG)
+                    self.progressWindow?.close()
+                    self.progressWindow = nil
+                    self.cleanupSession()
+                    self.presentInstallError(error)
+                    return
+                }
+                guard !expected.isEmpty, expected.lowercased() == computed.lowercased() else {
+                    try? FileManager.default.removeItem(at: stagedDMG)
+                    self.progressWindow?.close()
+                    self.progressWindow = nil
+                    self.cleanupSession()
+                    self.presentInstallError(NSError(
+                        domain: "ContextHUD.Update",
+                        code: 6,
+                        userInfo: [NSLocalizedDescriptionKey: L10n.text(
+                            "Integrity check failed.",
+                            "Bütünlük doğrulanamadı."
+                        )]
+                    ))
+                    return
+                }
+                self.installVerifiedDMG(at: stagedDMG, release: release)
+            }
+        }.resume()
+    }
+
+    private func installVerifiedDMG(at dmgPath: URL, release: ReleaseInfo) {
+        do {
+            let mountURL = try mountDMG(at: dmgPath)
             let stagedApp = mountURL.appendingPathComponent("ContextHUD.app")
             guard FileManager.default.fileExists(atPath: stagedApp.path) else {
                 throw NSError(domain: "ContextHUD.Update", code: 2, userInfo: [NSLocalizedDescriptionKey: "Mounted DMG did not contain ContextHUD.app"])
@@ -244,7 +331,32 @@ final class UpdateManager: NSObject, URLSessionDownloadDelegate {
             progressWindow = nil
             presentInstallError(error)
         }
+        try? FileManager.default.removeItem(at: dmgPath)
         cleanupSession()
+    }
+
+    private func parseShaToken(_ text: String) -> String {
+        for line in text.split(whereSeparator: { $0 == "\n" || $0 == "\r" }) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty { continue }
+            let token = trimmed.split(whereSeparator: { $0 == " " || $0 == "\t" }).first.map(String.init) ?? ""
+            if !token.isEmpty { return token }
+        }
+        return ""
+    }
+
+    private func sha256Hex(of fileURL: URL) throws -> String {
+        let handle = try FileHandle(forReadingFrom: fileURL)
+        defer { try? handle.close() }
+        var hasher = SHA256()
+        let chunkSize = 1 << 20
+        while true {
+            let chunk = try handle.read(upToCount: chunkSize) ?? Data()
+            if chunk.isEmpty { break }
+            hasher.update(data: chunk)
+        }
+        let digest = hasher.finalize()
+        return digest.map { String(format: "%02x", $0) }.joined()
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
