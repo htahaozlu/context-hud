@@ -4,6 +4,36 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, adapted for the current release workflow.
 
+## [0.3.8] - 2026-05-17
+
+### Added
+
+- Burn-rate forecast line in the hero card: when context usage trends predictively, shows "↗ on pace to fill in 1h 47m · window resets in 3h 12m" using a linear extrapolation from session start with a confidence gate (≥120s elapsed, non-zero rate).
+- Upstream incident overlay: polls Anthropic and OpenAI status pages every 5 minutes; lights a colored dot in the menubar title and adds a clickable incident strip to the popover hero.
+- Critical-background-session menubar indicator: when the foreground session is calm (<50%) and a parallel session exceeds 80%, appends a "⚠ <project> 88%" chip to the menubar title.
+- Reset-time style toggle (Settings → Display): switch every reset countdown between relative ("in 1h 47m") and absolute clock time ("14:32").
+- Threshold tick marks on context bars at 70% / 90%, toggleable from Settings → Display.
+- Loading stripe placeholder for the popover hero card while the engine is producing the first `hud.json` — replaces the misleading "no agent data yet" empty state on first launch.
+- Confetti burst on quota window resets (5h / 7d), gated per-agent and per-window so a single rollover only celebrates once. Respects reduce-motion.
+- `PersonalInfoRedactor` (Settings → Privacy): masks `$HOME`, `/Users/<name>/...`, and email addresses in any text exported through the app. Off by default, live preview in the privacy pane.
+- Settings panes split: new Display, Alerts, and Privacy tabs in the detail window.
+
+### Changed
+
+- Status item hardened against display reconfigure and wake-from-sleep: listens to `didChangeScreenParametersNotification` and `NSWorkspace.didWakeNotification`, recreates the `NSStatusItem` when its button window goes nil.
+- Engine reentrancy: 10 s timer, FSEvents bursts, wake-from-sleep refresh, and manual refresh now coalesce through `engineRunning` / `enginePending` flags so overlapping engine processes can no longer race.
+- FSEvents watcher rescans every tick — `~/.claude/projects` or `~/.codex/sessions` materializing after launch is now picked up without restart.
+- `LoadingStripeView` CVDisplayLink callback throttled to ~30 fps to keep the main queue clean while the placeholder is on screen.
+- Defensive JSON parsing in `Hud.parse()` — `u64` / `u64Opt` / `dbl` helpers handle integer-vs-double percentages and very large token counts that `JSONSerialization` returns as `Double`.
+- Rust `AgentUsage` struct now mirrors every field emitted by the Python ingest (`cache_read_tokens_*`, `ActiveSession.context_pct`, `context_window`, `last_input_tokens`) so per-session fields stop silently dropping on the menubar side.
+
+### Fixed
+
+- Celebration cross-agent key collision: Claude and Codex hitting the same window boundary inside 60 s no longer suppress each other's confetti.
+- Turkish strings: missing diacritics on the Appearance pane subtitle and the empty "X running" suffix in the popover meta row.
+- Menubar "no agent" fallback text now uses `menuBarFont` instead of the system default.
+- Footer icon buttons in the popover now expose VoiceOver labels.
+
 ## [0.3.7] - 2026-05-16
 
 ### Changed
