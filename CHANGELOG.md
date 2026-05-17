@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, adapted for the current release workflow.
 
+## [0.3.9] - 2026-05-17
+
+### Fixed
+
+- Active-session context % no longer lags during a live conversation. The Rust snapshot cache now invalidates whenever any `~/.claude/projects/**/*.jsonl` or `~/.codex/sessions/**/*.jsonl` has been written since the cache file's mtime, so mid-stream assistant turns reach `hud.json` without the prior 300 s TTL gating fresh data.
+
+### Changed
+
+- Popover refresh button is now a full re-aggregate: deletes both `~/.context-bar/usage.cache.json` and `~/.context-bar/usage_api_cache.json`, then re-runs the engine. Double-clicks within 2 s are coalesced. Icon spins while the engine is running; settles automatically on the next rebuild.
+
 ## [0.3.8] - 2026-05-17
 
 ### Added
