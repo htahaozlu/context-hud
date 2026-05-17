@@ -345,6 +345,20 @@ final class PrivacySettingsViewController: PreferencePaneViewController {
             ),
             body: previewStack
         )
+
+        let maskShare = makeToggle(
+            title: L10n.text("Mask project names on share card", "Paylaşım kartında proje adlarını gizle"),
+            on: DisplayPrefs.maskShareProjects,
+            action: #selector(maskShareChanged(_:))
+        )
+        addSection(
+            title: L10n.text("Share card", "Paylaşım kartı"),
+            subtitle: L10n.text(
+                "When you share Today's HUD from the popover footer, real project names are replaced with generic labels (Project A, Project B). Turn off to share real names.",
+                "Popover altındaki paylaşım düğmesinden Today's HUD'u paylaşırken proje adları genel etiketlerle değiştirilir (Project A, Project B). Gerçek adları paylaşmak için kapatın."
+            ),
+            body: maskShare
+        )
     }
 
     private func makeToggle(title: String, on: Bool, action: Selector) -> NSView {
@@ -355,6 +369,11 @@ final class PrivacySettingsViewController: PreferencePaneViewController {
 
     @objc private func redactChanged(_ sender: NSButton) {
         DisplayPrefs.redactPaths = sender.state == .on
+        onChange?()
+    }
+
+    @objc private func maskShareChanged(_ sender: NSButton) {
+        DisplayPrefs.maskShareProjects = sender.state == .on
         onChange?()
     }
 }

@@ -52,6 +52,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             // External script (marketing-screenshot.sh) handles the actual capture.
             // This env var just prevents the timer so the app stays responsive.
         }
+        if let sharePath = ProcessInfo.processInfo.environment["CONTEXTBAR_SHARE_RENDER_PATH"] {
+            let masked = (ProcessInfo.processInfo.environment["CONTEXTBAR_SHARE_MASK"] ?? "1") == "1"
+            let (_, all, others) = hud.load()
+            let img = ShareCard.render(agents: all, others: others, maskProjects: masked)
+            try? ShareCard.writePNG(img, to: URL(fileURLWithPath: sharePath))
+            NSApp.terminate(nil)
+            return
+        }
         if let popoverPath = ProcessInfo.processInfo.environment["CONTEXTBAR_POPOVER_SCREENSHOT_PATH"] {
             // Auto-open the menubar popover, give it a moment to lay out, then
             // shell out to `screencapture -l` on the popover's window number so
@@ -360,6 +368,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         popoverVC.onQuit = { [weak self] in
             self?.quit()
         }
+        popoverVC.onShare = { [weak self] anchor in
+            self?.presentShareCard(from: anchor)
+        }
         popoverVC.onPickTheme = { [weak self] id in
             ThemeStore.set(id)
             self?.previewTheme = nil
@@ -405,6 +416,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         if popover.isShown {
             popoverVC.rebuild()
         }
+    }
+
+    /// Renders the current usage state to a square-portrait PNG and opens the
+    /// native macOS share sheet anchored at `anchor`. Project names are
+    /// redacted by default (DisplayPrefs.maskShareProjects) so users can post
+    /// the card to social channels without leaking private repository names.
+    func presentShareCard(from anchor: NSView) {
+        let (_, all, others) = hud.load()
+        guard !all.isEmpty else { return }
+        let image = ShareCard.render(
+            agents: all,
+            others: others,
+            maskProjects: DisplayPrefs.maskShareProjects
+        )
+        let outURL = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("ContextBar-DailyHUD.png")
+        do {
+            try ShareCard.writePNG(image, to: outURL)
+        } catch {
+            NSSound.beep()
+            return
+        }
+        let picker = NSSharingServicePicker(items: [outURL])
+        picker.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .minY)
     }
 
     /// Repaints the status bar title using the current preview theme if any,

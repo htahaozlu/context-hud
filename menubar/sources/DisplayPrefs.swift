@@ -15,6 +15,7 @@ enum DisplayPrefs {
     private static let kIncidents = "displayPrefs.incidents"
     private static let kConfetti = "displayPrefs.confetti"
     private static let kRedactPaths = "displayPrefs.redactPaths"
+    private static let kMaskShareProjects = "displayPrefs.maskShareProjects"
 
     static var resetStyle: ResetStyle {
         get {
@@ -60,6 +61,14 @@ enum DisplayPrefs {
     static var redactPaths: Bool {
         get { UserDefaults.standard.bool(forKey: kRedactPaths) }
         set { UserDefaults.standard.set(newValue, forKey: kRedactPaths) }
+    }
+
+    /// Replace project names with generic labels on the share card.
+    /// Default ON — prevents accidental private-repo leaks when users share
+    /// their HUD on social channels.
+    static var maskShareProjects: Bool {
+        get { defaultsBool(kMaskShareProjects, default: true) }
+        set { UserDefaults.standard.set(newValue, forKey: kMaskShareProjects) }
     }
 
     private static func defaultsBool(_ key: String, default def: Bool) -> Bool {

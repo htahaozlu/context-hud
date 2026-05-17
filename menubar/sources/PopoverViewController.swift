@@ -14,6 +14,7 @@ final class MenubarPopoverViewController: NSViewController, NSMenuDelegate {
     var onOpenSettings: (() -> Void)?
     var onRefresh: (() -> Void)?
     var onQuit: (() -> Void)?
+    var onShare: ((NSView) -> Void)?
     var onPickTheme: ((String) -> Void)?
     /// Called while the user hovers theme menu items. Passes the hovered
     /// theme id (or nil to clear the preview). The host (AppDelegate) uses
@@ -762,6 +763,12 @@ final class MenubarPopoverViewController: NSViewController, NSMenuDelegate {
         let themeBtn = makeThemeButton()
         themeBtn.translatesAutoresizingMaskIntoConstraints = false
 
+        let shareBtn = FooterIconButton(
+            symbol: "square.and.arrow.up",
+            tooltip: L10n.text("Share Today's HUD", "Bugünün HUD'unu paylaş"),
+            target: self,
+            action: #selector(handleShare(_:))
+        )
         let settingsBtn = FooterIconButton(
             symbol: "slider.horizontal.3",
             tooltip: L10n.text("Settings", "Ayarlar"),
@@ -781,7 +788,7 @@ final class MenubarPopoverViewController: NSViewController, NSMenuDelegate {
             action: #selector(handleQuit)
         )
 
-        let rightStack = NSStackView(views: [settingsBtn, refreshBtn, quitBtn])
+        let rightStack = NSStackView(views: [shareBtn, settingsBtn, refreshBtn, quitBtn])
         rightStack.orientation = .horizontal
         rightStack.spacing = 4
         rightStack.translatesAutoresizingMaskIntoConstraints = false
@@ -903,6 +910,7 @@ final class MenubarPopoverViewController: NSViewController, NSMenuDelegate {
     @objc private func handleSettings() { onOpenSettings?() }
     @objc private func handleRefresh() { onRefresh?() }
     @objc private func handleQuit() { onQuit?() }
+    @objc private func handleShare(_ sender: NSView) { onShare?(sender) }
     @objc private func handleThemePick(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? String else { return }
         onPickTheme?(id)
