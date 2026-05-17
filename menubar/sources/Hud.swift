@@ -258,6 +258,13 @@ final class Hud {
         return formatTokens(tokens)
     }
 
+    static func formatRemainingValue(percentUsed: Double?, tokens: UInt64) -> String {
+        guard let percentUsed else { return formatTokens(tokens) }
+        let remaining = max(0, min(100, 100 - percentUsed))
+        let suffix = L10n.text(" left", " kalan")
+        return String(format: "%.0f%%%@", remaining, suffix)
+    }
+
     static func relative(_ date: Date) -> String {
         let elapsed = Date().timeIntervalSince(date)
         return L10n.relative(elapsed)

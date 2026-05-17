@@ -512,12 +512,14 @@ final class MenubarPopoverViewController: NSViewController, NSMenuDelegate {
         header.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
 
         var rows: [NSView] = []
+        let showsRemaining = a.name.caseInsensitiveCompare("Codex") == .orderedSame
         if a.session5hPercent != nil || a.session5h > 0 {
             rows.append(makeLimitRow(
                 label: L10n.text("5h limit", "5sa limit"),
                 percent: a.session5hPercent,
                 fallbackValue: Hud.formatTokens(a.session5h),
-                resetsAt: a.session5hResetsAt
+                resetsAt: a.session5hResetsAt,
+                showsRemaining: showsRemaining
             ))
         }
         if a.week7dPercent != nil || a.week7d > 0 {
@@ -525,7 +527,8 @@ final class MenubarPopoverViewController: NSViewController, NSMenuDelegate {
                 label: L10n.text("7d limit", "7g limit"),
                 percent: a.week7dPercent,
                 fallbackValue: Hud.formatTokens(a.week7d),
-                resetsAt: a.week7dResetsAt
+                resetsAt: a.week7dResetsAt,
+                showsRemaining: showsRemaining
             ))
         }
         if a.activeSession > 0 {
@@ -544,9 +547,15 @@ final class MenubarPopoverViewController: NSViewController, NSMenuDelegate {
 
     /// Limit row with inline progress bar: label + percent + reset on top line,
     /// full-width bar below. Bar color tracks the usage threshold.
-    private func makeLimitRow(label: String, percent: Double?, fallbackValue: String, resetsAt: Date?) -> NSView {
+    private func makeLimitRow(label: String, percent: Double?, fallbackValue: String, resetsAt: Date?, showsRemaining: Bool = false) -> NSView {
         let color = usageColor(percent)
-        let valueText = percent.map { String(format: "%.0f%%", $0) } ?? fallbackValue
+        let valueText: String = {
+            guard let percent else { return fallbackValue }
+            if showsRemaining {
+                return Hud.formatRemainingValue(percentUsed: percent, tokens: 0)
+            }
+            return String(format: "%.0f%%", percent)
+        }()
 
         let lbl = NSTextField(labelWithString: label)
         lbl.font = NSFont.systemFont(ofSize: 12)

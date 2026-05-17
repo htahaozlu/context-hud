@@ -107,6 +107,13 @@ final class UsageViewController: NSViewController {
         let ctxPctStr = a.ctxPct.map { String(format: "%.0f%%", $0) } ?? "—"
         let ctxSub = a.ctxWindow.map { L10n.text("\(Hud.formatTokens($0)) window", "\(Hud.formatTokens($0)) pencere") } ?? "—"
         let sessDur = Hud.formatDuration(a.sessionStarted, a.lastTurn)
+        let showsRemaining = a.name.caseInsensitiveCompare("Codex") == .orderedSame
+        let fiveHourValue = showsRemaining
+            ? Hud.formatRemainingValue(percentUsed: a.session5hPercent, tokens: a.session5h)
+            : Hud.formatUsageValue(percent: a.session5hPercent, tokens: a.session5h)
+        let sevenDayValue = showsRemaining
+            ? Hud.formatRemainingValue(percentUsed: a.week7dPercent, tokens: a.week7d)
+            : Hud.formatUsageValue(percent: a.week7dPercent, tokens: a.week7d)
 
         let tiles = NSStackView(views: [
             DualStatTileView(caption: L10n.text("context", "bağlam"),
@@ -116,10 +123,10 @@ final class UsageViewController: NSViewController {
                              value: Hud.formatTokens(a.activeSession),
                              sub: L10n.text("\(sessDur) running", "\(sessDur) süredir aktif")),
             DualStatTileView(caption: L10n.text("5h window", "5s pencere"),
-                             value: Hud.formatUsageValue(percent: a.session5hPercent, tokens: a.session5h),
+                             value: fiveHourValue,
                              sub: L10n.text("resets in \(Hud.resetsIn(a.session5hResetsAt))", "\(Hud.resetsIn(a.session5hResetsAt)) sonra sıfırlanır")),
             DualStatTileView(caption: L10n.text("7d window", "7g pencere"),
-                             value: Hud.formatUsageValue(percent: a.week7dPercent, tokens: a.week7d),
+                             value: sevenDayValue,
                              sub: L10n.text("resets in \(Hud.resetsIn(a.week7dResetsAt))", "\(Hud.resetsIn(a.week7dResetsAt)) sonra sıfırlanır")),
         ])
         tiles.orientation = .horizontal

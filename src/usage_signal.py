@@ -32,6 +32,8 @@ extension sandbox in pure Rust would duplicate logic python3 ships natively.
 import glob
 import json
 import os
+import select
+import shutil
 import subprocess
 import sys
 import time
@@ -234,6 +236,129 @@ def parse_usage_percent(value):
     if isinstance(value, (int, float)):
         return round(max(0.0, min(200.0, float(value))), 1)
     return None
+
+
+def _write_json_line(proc, payload):
+    try:
+        proc.stdin.write(json.dumps(payload) + "\n")
+        proc.stdin.flush()
+        return True
+    except Exception:
+        return False
+
+
+def fetch_codex_rate_limits_app_server(timeout=12):
+    """Read live Codex quota state through the local Codex app-server.
+
+    Codex transcripts only receive `rate_limits` when a Codex turn streams a
+    token_count event. The account/rateLimits/read app-server method is the
+    same local path Codex UI uses for its balance panel, so a ContextBar
+    refresh can update quota without needing a new Codex assistant turn.
+    """
+    exe = shutil.which("codex")
+    if not exe:
+        return None
+    try:
+        proc = subprocess.Popen(
+            [exe, "app-server", "--listen", "stdio://"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            bufsize=1,
+        )
+    except Exception:
+        return None
+
+    try:
+        init = {
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "clientInfo": {"name": "contextbar", "version": "0"},
+                "capabilities": None,
+            },
+        }
+        req = {"id": 2, "method": "account/rateLimits/read", "params": None}
+        if not _write_json_line(proc, init) or not _write_json_line(proc, req):
+            return None
+
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if proc.stdout is None:
+                return None
+            ready, _, _ = select.select([proc.stdout], [], [], max(0.0, deadline - time.time()))
+            if not ready:
+                break
+            line = proc.stdout.readline()
+            if not line:
+                break
+            try:
+                msg = json.loads(line)
+            except Exception:
+                continue
+            if msg.get("id") != 2:
+                continue
+            result = msg.get("result") or {}
+            by_id = result.get("rateLimitsByLimitId") or {}
+            if isinstance(by_id, dict) and isinstance(by_id.get("codex"), dict):
+                return by_id.get("codex")
+            if isinstance(result.get("rateLimits"), dict):
+                return result.get("rateLimits")
+            return None
+    finally:
+        try:
+            if proc.stdin:
+                proc.stdin.close()
+        except Exception:
+            pass
+        try:
+            proc.terminate()
+            proc.wait(timeout=1)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+    return None
+
+
+def _epoch_to_iso(value):
+    if not isinstance(value, (int, float)):
+        return None
+    if value <= NOW:
+        return None
+    return datetime.fromtimestamp(value, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def parse_codex_rate_limit_window(window):
+    if not isinstance(window, dict):
+        return (None, None)
+    pct = parse_usage_percent(window.get("usedPercent"))
+    if pct is None:
+        pct = parse_usage_percent(window.get("used_percent"))
+    resets = _epoch_to_iso(window.get("resetsAt"))
+    if resets is None:
+        resets = _epoch_to_iso(window.get("resets_at"))
+    return (pct, resets)
+
+
+def apply_codex_rate_limits(out, snapshot):
+    if not isinstance(snapshot, dict):
+        return out
+    primary = snapshot.get("primary") or {}
+    secondary = snapshot.get("secondary") or {}
+    pct, resets = parse_codex_rate_limit_window(primary)
+    if pct is not None:
+        out["session_5h_percent"] = pct
+    if resets:
+        out["session_5h_resets_at"] = resets
+    pct, resets = parse_codex_rate_limit_window(secondary)
+    if pct is not None:
+        out["week_7d_percent"] = pct
+    if resets:
+        out["week_7d_resets_at"] = resets
+    return out
 
 
 def apply_claude_usage_api(out):
@@ -936,23 +1061,6 @@ def collect_codex():
         except OSError:
             continue
 
-    if latest_rate_limits:
-        primary = latest_rate_limits.get("primary") or {}
-        secondary = latest_rate_limits.get("secondary") or {}
-        # Only use primary if its reset window hasn't passed yet
-        p_resets = primary.get("resets_at")
-        if "used_percent" in primary and p_resets and p_resets > NOW:
-            out["session_5h_percent"] = parse_usage_percent(primary["used_percent"])
-            out["session_5h_resets_at"] = datetime.fromtimestamp(
-                p_resets, tz=timezone.utc
-            ).isoformat().replace("+00:00", "Z")
-        s_resets = secondary.get("resets_at")
-        if "used_percent" in secondary and s_resets and s_resets > NOW:
-            out["week_7d_percent"] = parse_usage_percent(secondary["used_percent"])
-            out["week_7d_resets_at"] = datetime.fromtimestamp(
-                s_resets, tz=timezone.utc
-            ).isoformat().replace("+00:00", "Z")
-
     if out["active_session_file"]:
         s = per_session.get(out["active_session_file"])
         if s:
@@ -972,6 +1080,8 @@ def collect_codex():
     if week_7d_oldest is not None:
         ts = week_7d_oldest + WIN_WEEK
         out["week_7d_resets_at"] = datetime.fromtimestamp(ts, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+    out = apply_codex_rate_limits(out, latest_rate_limits)
+    out = apply_codex_rate_limits(out, fetch_codex_rate_limits_app_server())
     return out
 
 

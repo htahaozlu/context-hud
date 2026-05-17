@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, adapted for the current release workflow.
 
+## [0.3.11] - 2026-05-17
+
+### Fixed
+
+- Codex limit refresh now reads the live Codex app-server `account/rateLimits/read` state instead of relying only on the last transcript `rate_limits` event, so the 5h/7d HUD updates without waiting for a new Codex turn.
+- Codex limit rows now display remaining quota text to match the official Codex balance wording, while preserving usage-based progress bars and threshold colors. Claude limit display is unchanged.
+
 ## [0.3.10] - 2026-05-17
 
 ### Fixed
