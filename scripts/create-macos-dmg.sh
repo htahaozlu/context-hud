@@ -10,7 +10,7 @@ DMG_PATH="$DIST_DIR/ContextBar.dmg"
 APP_ZIP="$DIST_DIR/ContextBar.zip"
 NOTARY_PROFILE="${NOTARY_PROFILE:-contextbar-notary}"
 
-"$ROOT/scripts/build-menubar-app.sh"
+WIDGET_BUILD="${WIDGET_BUILD:-1}" "$ROOT/scripts/build-menubar-app.sh"
 
 APP_SIG_INFO="$(codesign -dv --verbose=2 "$APP_PATH" 2>&1 || true)"
 SIGNED_DEVELOPER_ID=0

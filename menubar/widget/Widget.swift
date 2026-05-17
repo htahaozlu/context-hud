@@ -1,6 +1,7 @@
 import WidgetKit
 import SwiftUI
 import Foundation
+import AppKit
 
 // MARK: - Data
 
@@ -21,10 +22,25 @@ struct HudSnapshot {
 
     static let empty = HudSnapshot(active: nil, agents: [], generatedAt: Date())
 
+    static let appGroupID = "DQJT5BCZCM.com.htahaozlu.contextbar"
+
     static func load() -> HudSnapshot {
-        let path = "\(NSHomeDirectory())/.context-bar/hud.json"
+        let fm = FileManager.default
+        var candidates: [URL] = []
+        if let groupURL = fm.containerURL(forSecurityApplicationGroupIdentifier: appGroupID) {
+            candidates.append(groupURL.appendingPathComponent("hud.json"))
+        }
+        candidates.append(URL(fileURLWithPath: "\(NSHomeDirectory())/.context-bar/hud.json"))
+
+        var loaded: Data?
+        for url in candidates {
+            if let data = try? Data(contentsOf: url) {
+                loaded = data
+                break
+            }
+        }
         guard
-            let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+            let data = loaded,
             let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return .empty }
 

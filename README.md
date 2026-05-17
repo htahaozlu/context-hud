@@ -140,12 +140,57 @@ The companion app reads `~/.context-bar/hud.json` and provides:
 - a full Settings window with Usage, Appearance, Menubar, and About tabs
 - per-session context percentage for parallel Claude / Codex sessions
 
-A Notification Center / desktop widget (small, medium, large) is wired up in
-`menubar/widget/Widget.swift` and ready to ship, but bundling it requires an
-Xcode subproject — building widget extensions with raw `swiftc` produces an
-`.appex` that pluginkit silently refuses to enumerate. The build-script flag
-`WIDGET_BUILD=1` opts into the experimental swiftc path; the proper Xcode
-hand-off is tracked as the next milestone for the macOS companion.
+### Desktop & Notification Center widget
+
+ContextBar ships with a native WidgetKit extension in three sizes —
+`systemSmall`, `systemMedium`, and `systemLarge`. The widget reads the same
+`hud.json` as the menubar via a shared App Group container
+(`DQJT5BCZCM.com.htahaozlu.contextbar`), so it always reflects the active
+agent, project, model, context %, rolling 5h/7d limits, and a per-agent
+breakdown without any extra daemon.
+
+<p align="center">
+  <img src="docs/images/context-bar-screenshot.png" alt="ContextBar widget preview placeholder" width="100%">
+</p>
+
+To add it:
+
+1. Install ContextBar 0.3.12 or later and launch it once so macOS indexes
+   the extension (`pluginkit -m -v -i com.htahaozlu.contextbar.widget`
+   should list it).
+2. Open Notification Center (click the clock) → **Edit Widgets**, or
+   right-click the desktop → **Edit Widgets**.
+3. Search for **ContextBar**, then drop the small / medium / large variant
+   wherever you want.
+
+The widget extension is sandboxed and signed with the App Group entitlement,
+which is required by `chronod` on macOS 14+ (the previous unsandboxed bundle
+was silently rejected with `Ignoring restricted or unknown extension`).
+The host menubar app mirrors `~/.context-bar/hud.json` into the App Group
+container on every refresh so the sandboxed widget can read it.
+
+### Share Today's HUD
+
+The popover footer has a **Share** button (`square.and.arrow.up`) that
+renders the current HUD as a PNG share card — active agent, model, context
+%, 5h/7d usage, and other detected tools — masked by default so project
+names are not leaked. The image is saved to a temporary path and opened in
+Preview / a save dialog so you can drop it into Slack, X, or a status
+thread without screenshotting and cropping.
+
+<p align="center">
+  <img src="docs/images/context-bar-screenshot-full.png" alt="ContextBar share card preview" width="100%">
+</p>
+
+Headless render (no UI) for automation:
+
+```bash
+CONTEXTBAR_SHARE_RENDER_PATH=/tmp/hud.png \
+CONTEXTBAR_SHARE_MASK=1 \
+/Applications/ContextBar.app/Contents/MacOS/context-bar
+```
+
+Set `CONTEXTBAR_SHARE_MASK=0` to keep real project names in the card.
 
 If the menubar icon is hidden by overflow (Bartender, Hidden Bar, or a
 crowded menubar), launching ContextBar again from Finder / Spotlight opens
@@ -233,6 +278,14 @@ The repository includes scripts for the macOS companion build:
 scripts/build-menubar-app.sh
 scripts/create-macos-dmg.sh
 ```
+
+To include the WidgetKit extension in a direct app build:
+
+```bash
+WIDGET_BUILD=1 scripts/build-menubar-app.sh
+```
+
+`scripts/create-macos-dmg.sh` enables the widget build by default.
 
 Artifacts:
 

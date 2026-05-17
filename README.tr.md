@@ -132,11 +132,57 @@ Yardımcı uygulama `~/.context-bar/hud.json` dosyasını okur ve şunları sağ
 - Kullanım, Görünüm, Menubar ve Hakkında sekmeleri olan tam Ayarlar penceresi
 - paralel Claude / Codex oturumları için per-session bağlam yüzdesi
 
-Bildirim Merkezi / masaüstü widget'ı (küçük, orta, büyük) `menubar/widget/
-Widget.swift` içinde hazır; ancak paketlemek bir Xcode alt projesi gerektirir
-— ham `swiftc` ile derlenen `.appex` pluginkit tarafından sessizce reddediliyor.
-Build script bayrağı `WIDGET_BUILD=1` deneysel swiftc yolunu açar; düzgün
-Xcode entegrasyonu macOS yardımcısının sıradaki kilometre taşı.
+### Masaüstü ve Bildirim Merkezi widget'ı
+
+ContextBar üç boyutta native bir WidgetKit eklentisiyle gelir:
+`systemSmall`, `systemMedium`, `systemLarge`. Widget aynı `hud.json`'u
+menubar ile paylaşılan App Group container'ı
+(`DQJT5BCZCM.com.htahaozlu.contextbar`) üzerinden okur; aktif agent,
+proje, model, context %, 5h/7d limitleri ve agent başına dökümünü ekstra
+bir daemon olmadan gösterir.
+
+<p align="center">
+  <img src="docs/images/context-bar-screenshot.png" alt="ContextBar widget önizleme" width="100%">
+</p>
+
+Eklemek için:
+
+1. ContextBar 0.3.12+ sürümünü kurun ve bir kez başlatın. macOS extension'ı
+   indeksleyecek (`pluginkit -m -v -i com.htahaozlu.contextbar.widget`
+   listede çıkmalı).
+2. Bildirim Merkezi'ni açın (saati tıklayın) → **Widget'ları Düzenle**,
+   veya masaüstüne sağ tıklayın → **Widget'ları Düzenle**.
+3. **ContextBar** araması yapın, küçük/orta/büyük varyantı istediğiniz
+   yere bırakın.
+
+Widget extension sandboxlu ve App Group entitlement'ı ile imzalı. macOS 14+
+(macOS 26 Tahoe dahil) `chronod` sandboxsuz widget extension'larını sessizce
+reddediyordu (`Ignoring restricted or unknown extension`). Host menubar
+uygulaması her refresh'te `~/.context-bar/hud.json`'u App Group container'a
+mirror'lar; sandbox içindeki widget bunu okur.
+
+### Bugünün HUD'unu paylaş
+
+Popover footer'da **Paylaş** butonu (`square.and.arrow.up`) mevcut HUD'u
+PNG kartı olarak render eder: aktif agent, model, context %, 5h/7d
+kullanım ve tespit edilen diğer araçlar. Varsayılan olarak proje isimleri
+maskelenir, böylece repo adlarınız sızmaz. PNG geçici bir yola yazılır ve
+Preview / kaydetme diyaloğuyla açılır; ekran görüntüsü alıp kırpmadan
+Slack, X veya durum güncellemelerine drop edebilirsiniz.
+
+<p align="center">
+  <img src="docs/images/context-bar-screenshot-full.png" alt="ContextBar paylaşım kartı önizleme" width="100%">
+</p>
+
+UI olmadan headless render (otomasyon için):
+
+```bash
+CONTEXTBAR_SHARE_RENDER_PATH=/tmp/hud.png \
+CONTEXTBAR_SHARE_MASK=1 \
+/Applications/ContextBar.app/Contents/MacOS/context-bar
+```
+
+Gerçek proje isimlerinin kartta kalması için `CONTEXTBAR_SHARE_MASK=0`.
 
 Menubar simgesi taşma nedeniyle gizlenirse (Bartender, Hidden Bar veya
 kalabalık menubar), uygulamayı Finder / Spotlight'tan tekrar açtığınızda
@@ -224,6 +270,14 @@ Depoda macOS yardımcı uygulaması derlemesi için scriptler bulunur:
 scripts/build-menubar-app.sh
 scripts/create-macos-dmg.sh
 ```
+
+Doğrudan app build'inde WidgetKit extension'ı app bundle'a dahil etmek için:
+
+```bash
+WIDGET_BUILD=1 scripts/build-menubar-app.sh
+```
+
+`scripts/create-macos-dmg.sh` widget build'ini varsayılan olarak açar.
 
 Artifact'ler:
 

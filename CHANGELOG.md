@@ -4,7 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, adapted for the current release workflow.
 
+## [0.3.12] - 2026-05-17
+
+### Fixed
+
+- Widget extension now passes `chronod` enrolment on macOS 14+ (including macOS 26 Tahoe), which silently rejected the previous unsandboxed bundle. The `appex` now ships with `com.apple.security.app-sandbox=true` and the `DQJT5BCZCM.com.htahaozlu.contextbar` App Group entitlement, so users can add ContextBar from the system widget gallery without manual intervention.
+- The host menubar app mirrors `~/.context-bar/hud.json` into the shared App Group container on launch and after every engine run, so the sandboxed widget can read the snapshot it could not access via `NSHomeDirectory()` before.
+
 ## [0.3.11] - 2026-05-17
+
+### Added
+
+- WidgetKit packaging now uses a checked-in Xcode subproject and `xcodebuild` when `WIDGET_BUILD=1`, producing and embedding `ContextBarWidget.appex` under `Contents/PlugIns` instead of the previous raw-`swiftc` bundle.
+- DMG packaging enables the widget build by default so installed release artifacts expose ContextBar in the system widget gallery after first launch.
 
 ### Fixed
 

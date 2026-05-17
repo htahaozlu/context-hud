@@ -21,11 +21,12 @@ BRAND_ICONS_SRC="$ROOT/menubar/assets/brands"
 BRAND_ICONS_DST="$RESOURCES_DIR/brands"
 APP_PLIST_DST="$CONTENTS_DIR/Info.plist"
 WIDGET_SRC_DIR="$ROOT/menubar/widget"
-WIDGET_PLIST_SRC="$ROOT/packaging/macos/widget/Info.plist"
+WIDGET_XCODEPROJ="$ROOT/packaging/macos/ContextBarWidget.xcodeproj"
+WIDGET_XCODEGEN="$ROOT/scripts/generate-widget-xcodeproj.rb"
 WIDGET_ENTITLEMENTS="$ROOT/packaging/macos/widget/Widget.entitlements"
 PLUGINS_DIR="$CONTENTS_DIR/PlugIns"
 WIDGET_APPEX="$PLUGINS_DIR/ContextBarWidget.appex"
-WIDGET_EXEC="$WIDGET_APPEX/Contents/MacOS/ContextBarWidget"
+WIDGET_BUILD_DIR="$ROOT/target/widget-xcodebuild"
 
 VERSION="$(sed -n 's/^version = \"\(.*\)\"/\1/p' "$ROOT/Cargo.toml" | head -n1)"
 if [[ -z "$VERSION" ]]; then
@@ -94,47 +95,27 @@ lipo -create "$ENGINE_ARM64" "$ENGINE_X86_64" -output "$ENGINE_DST"
 chmod +x "$ENGINE_DST"
 cp "$USAGE_PY_SRC" "$USAGE_PY_DST"
 
-# WidgetKit extension is experimental and currently disabled — building
-# `.appex` via raw `swiftc` produces a binary that pluginkit silently refuses
-# to enumerate even when Info.plist, embedded __TEXT,__info_plist, codesign,
-# and notarization all check out (Stats-app comparison passes byte-for-byte
-# on the bundle structure). The proper fix is to add an Xcode subproject for
-# the widget and invoke `xcodebuild` here so the WidgetKit framework's hidden
-# build-system requirements (auto-injected Swift stdlib, entitlements, build
-# settings) are honored. Until then, opt-in via `WIDGET_BUILD=1`.
+# WidgetKit extensions need Xcode's extension build pipeline. Raw `swiftc`
+# can produce an `.appex`-shaped bundle that pluginkit refuses to enumerate.
+# Keep widget packaging opt-in until release signing/notarization covers it.
 if [[ "${WIDGET_BUILD:-0}" == "1" && -d "$WIDGET_SRC_DIR" ]]; then
-  WIDGET_MIN="13.0"
-  mkdir -p "$WIDGET_APPEX/Contents/MacOS" "$WIDGET_APPEX/Contents/Resources"
-  WIDGET_ARM64="$WIDGET_EXEC.arm64"
-  WIDGET_X86_64="$WIDGET_EXEC.x86_64"
-  # Stage the Info.plist first so we can embed it into the Mach-O's
-  # __TEXT,__info_plist section — pluginkit verifies the embedded plist
-  # matches the on-disk one and silently refuses to register the extension
-  # when the embedded copy is missing.
-  cp "$WIDGET_PLIST_SRC" "$WIDGET_APPEX/Contents/Info.plist"
-  /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$WIDGET_APPEX/Contents/Info.plist"
-  /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$WIDGET_APPEX/Contents/Info.plist"
-  xcrun --sdk macosx swiftc -O \
-    -target "arm64-apple-macos${WIDGET_MIN}" \
-    -framework WidgetKit -framework SwiftUI -framework AppKit \
-    -application-extension -parse-as-library \
-    -Xlinker -e -Xlinker _NSExtensionMain \
-    -Xlinker -F -Xlinker /System/Library/PrivateFrameworks \
-    -Xlinker -framework -Xlinker PlugInKit \
-    -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker "$WIDGET_APPEX/Contents/Info.plist" \
-    "$WIDGET_SRC_DIR"/*.swift -o "$WIDGET_ARM64"
-  xcrun --sdk macosx swiftc -O \
-    -target "x86_64-apple-macos${WIDGET_MIN}" \
-    -framework WidgetKit -framework SwiftUI -framework AppKit \
-    -application-extension -parse-as-library \
-    -Xlinker -e -Xlinker _NSExtensionMain \
-    -Xlinker -F -Xlinker /System/Library/PrivateFrameworks \
-    -Xlinker -framework -Xlinker PlugInKit \
-    -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker "$WIDGET_APPEX/Contents/Info.plist" \
-    "$WIDGET_SRC_DIR"/*.swift -o "$WIDGET_X86_64"
-  lipo -create "$WIDGET_ARM64" "$WIDGET_X86_64" -output "$WIDGET_EXEC"
-  rm -f "$WIDGET_ARM64" "$WIDGET_X86_64"
-  chmod +x "$WIDGET_EXEC"
+  if [[ ! -d "$WIDGET_XCODEPROJ" ]]; then
+    "$WIDGET_XCODEGEN"
+  fi
+  rm -rf "$WIDGET_BUILD_DIR"
+  xcodebuild \
+    -project "$WIDGET_XCODEPROJ" \
+    -target ContextBarWidget \
+    -configuration Release \
+    SYMROOT="$WIDGET_BUILD_DIR/Build/Products" \
+    MARKETING_VERSION="$VERSION" \
+    CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+    CODE_SIGNING_ALLOWED=NO \
+    ARCHS="arm64 x86_64" \
+    ONLY_ACTIVE_ARCH=NO \
+    build
+  mkdir -p "$PLUGINS_DIR"
+  cp -R "$WIDGET_BUILD_DIR/Build/Products/Release/ContextBarWidget.appex" "$WIDGET_APPEX"
 fi
 
 # Strip quarantine / provenance xattrs that browsers leak into source files.

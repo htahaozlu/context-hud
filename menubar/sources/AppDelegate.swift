@@ -37,6 +37,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
         setupPopover()
         refresh()
+        syncHudToGroupContainer()
         let args = CommandLine.arguments.dropFirst()
         if ProcessInfo.processInfo.environment["CONTEXTBAR_OPEN_WINDOW"] == "1"
             || args.contains("--settings") || args.contains("--open") {
@@ -326,11 +327,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     private func reloadWidgets() {
+        syncHudToGroupContainer()
         #if canImport(WidgetKit)
         if #available(macOS 11.0, *) {
             WidgetCenter.shared.reloadAllTimelines()
         }
         #endif
+    }
+
+    /// The widget extension is sandboxed so it cannot read `~/.context-bar/hud.json`
+    /// directly. Mirror the latest snapshot into the shared App Group container
+    /// the widget *can* read via `containerURL(forSecurityApplicationGroupIdentifier:)`.
+    private func syncHudToGroupContainer() {
+        let fm = FileManager.default
+        let src = "\(NSHomeDirectory())/.context-bar/hud.json"
+        guard fm.fileExists(atPath: src) else { return }
+        guard let container = fm.containerURL(
+            forSecurityApplicationGroupIdentifier: "DQJT5BCZCM.com.htahaozlu.contextbar"
+        ) else { return }
+        let dst = container.appendingPathComponent("hud.json")
+        do {
+            if fm.fileExists(atPath: dst.path) {
+                try fm.removeItem(at: dst)
+            }
+            try fm.copyItem(at: URL(fileURLWithPath: src), to: dst)
+        } catch {
+            // Group container may not exist until the widget is provisioned;
+            // ignore — the widget will fall back to the legacy path.
+        }
     }
 
     private func runEngine() {

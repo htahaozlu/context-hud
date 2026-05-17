@@ -4,6 +4,7 @@ Install
 1. Drag "ContextBar.app" into Applications.
 2. Open the app from Applications.
 3. If macOS warns about the app, allow it from System Settings if you trust the source.
+4. To add the widget, open the macOS widget gallery and choose "ContextBar".
 
 After install
 - Eject this disk image.
