@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, adapted for the current release workflow.
 
+## [0.3.10] - 2026-05-17
+
+### Fixed
+
+- Dark-mode readability in menubar/popup surfaces now uses dynamic text colors for attributed strings and theme presets that previously could render too dark.
+- The Parallel Sessions card is now hidden unless there is at least one actual background session after foreground-session filtering, preventing an empty card from appearing.
+- Homebrew migration polish for the ContextBar rename: local docs use the fully qualified tap upgrade command, the cask follows current Homebrew style, and release tap sync now fails with a clearer token-permission error.
+- Removed the remaining tracked `context-hud` ignore entry after the project rename.
+
 ## [0.3.9] - 2026-05-17
 
 ### Fixed
