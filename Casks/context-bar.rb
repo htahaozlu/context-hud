@@ -1,6 +1,6 @@
 cask "context-bar" do
-  version "0.3.13"
-  sha256 "87d52391de8d59545b3ed5d1db152237da6f8f84f74cda48332823b7ec0af20a"
+  version "0.3.14"
+  sha256 "655f8c5dc7287e2f552fba2f09ee8849e9a69e9088abd3c6a80fe3984c67d2e8"
 
   url "https://github.com/htahaozlu/context-bar/releases/download/v#{version}/ContextBar.dmg"
   name "ContextBar"
