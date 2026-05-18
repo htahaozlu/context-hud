@@ -45,15 +45,15 @@ final class MenubarPopoverViewController: NSViewController, NSMenuDelegate {
         root.addSubview(visualEffect)
 
         contentStack.orientation = .vertical
-        contentStack.alignment = .leading
+        // `.width` stretches every arranged subview to the stack's content
+        // width. Previous `.leading` alignment installed an implicit
+        // subview.leading == stack.leading constraint that fought the explicit
+        // +Spacing.m leading from `addCard()`. Whichever lost broke layout —
+        // the hero card would either flush-left (gap top+right) or over-
+        // stretch. Horizontal padding now lives entirely in `edgeInsets`.
+        contentStack.alignment = .width
         contentStack.spacing = Spacing.s
-        // All four edges equalized — top/bottom carry the full Spacing.m and
-        // leading/trailing get the remainder via `addCard()` so every visible
-        // gap around the cards is 16pt. Previously top/bottom were 16 while
-        // L/R were only 12, which read as a top/right whitespace bias.
-        // Footer view brings its own vertical pad — match that here so the
-        // gap above/below the footer reads symmetric with the side insets.
-        contentStack.edgeInsets = NSEdgeInsets(top: Spacing.m, left: 0, bottom: Spacing.xs, right: 0)
+        contentStack.edgeInsets = NSEdgeInsets(top: Spacing.m, left: Spacing.m, bottom: Spacing.xs, right: Spacing.m)
         contentStack.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(contentStack)
 
@@ -75,7 +75,8 @@ final class MenubarPopoverViewController: NSViewController, NSMenuDelegate {
         let hud = Hud()
         let (active, all, others) = hud.load()
         let primary = active ?? all.first
-        let key = snapshotKey(active: active, primary: primary, all: all, others: others)
+        let activeOthers = others.filter { $0.sessions7d > 0 || $0.tokens7d > 0 }
+        let key = snapshotKey(active: active, primary: primary, all: all, others: activeOthers)
         // Engine returned — stop the manual-refresh spinner whether or not the
         // snapshot key actually changed. If the footer gets rebuilt below the
         // call is a no-op against the new button.
@@ -118,8 +119,8 @@ final class MenubarPopoverViewController: NSViewController, NSMenuDelegate {
                 addCard(buildLoadingState())
             }
         }
-        if !others.isEmpty {
-            addCard(buildOthers(tools: others))
+        if !activeOthers.isEmpty {
+            addCard(buildOthers(tools: activeOthers))
         }
         addCard(buildFooter())
 
@@ -142,20 +143,15 @@ final class MenubarPopoverViewController: NSViewController, NSMenuDelegate {
         }
     }
 
-    /// Adds a section view to the popover stack and pins both leading and
-    /// trailing edges to the stack — without this, NSStackView's `.leading`
-    /// alignment only pins one edge and views with narrow intrinsic content
-    /// (e.g. a card with a single short row) shrink instead of filling the
-    /// full popover width.
+    /// Adds a section view to the popover stack. Width is enforced by the
+    /// stack's `.width` alignment + `edgeInsets`; no per-card L/R constraints
+    /// here (those used to fight NSStackView's implicit alignment constraint
+    /// and made the hero card jitter between flush-left and over-stretched).
     private func addCard(_ v: NSView) {
         v.translatesAutoresizingMaskIntoConstraints = false
         v.setContentHuggingPriority(.required, for: .vertical)
         v.setContentCompressionResistancePriority(.required, for: .vertical)
         contentStack.addArrangedSubview(v)
-        NSLayoutConstraint.activate([
-            v.leadingAnchor.constraint(equalTo: contentStack.leadingAnchor, constant: Spacing.m),
-            v.trailingAnchor.constraint(equalTo: contentStack.trailingAnchor, constant: -Spacing.m),
-        ])
     }
 
     // MARK: - Sections
